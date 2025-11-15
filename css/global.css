@@ -1,0 +1,23 @@
+body{
+    display: flex;
+    justify-content: center;
+    overflow-y: hidden;
+}
+
+main{
+    display: flex;
+    flex-wrap: nowrap;
+    flex-direction: row;
+    justify-content: center;
+    align-items: center;
+    gap: 0px 10px;
+    height: 100vh;
+}
+
+fieldset legend{
+    text-align: center;
+}
+
+#tela{
+    background-color: rgba(0, 0, 0, 0.378);
+}

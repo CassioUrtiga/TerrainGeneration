@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="css/global.css">
+    <title>Document</title>
+</head>
+<body>
+    <main>
+        <div>
+            <canvas id="tela"></canvas>
+        </div>
+        <div>
+            <fieldset>
+                <legend>Configurar</legend>
+
+                <div>
+                    <label for="velocidade">Velocidade</label>
+                    <input 
+                        type="range" 
+                        id="velocidade" 
+                        min="0" 
+                        max="1" 
+                        step="0.01"
+                        value="0.03" 
+                        oninput="valorVelocidade.textContent = this.value"
+                    />
+                    <output id="valorVelocidade">0.03</output>
+                </div>
+
+                <div>
+                    <label for="algoritmo">Algoritmo</label>
+                    <input 
+                        type="range" 
+                        id="algoritmo" 
+                        min="0" 
+                        max="7"
+                        value="0" 
+                        oninput="valorAlgoritmo.textContent = this.value"
+                    />
+                    <output id="valorAlgoritmo">0</output>
+                </div>
+
+                <div>
+                    <label for="amplitude">Amplitude</label>
+                    <input 
+                        type="range" 
+                        id="amplitude" 
+                        min="0" 
+                        max="100" 
+                        value="10" 
+                        oninput="valorAmplitude.textContent = this.value"
+                    />
+                    <output id="valorAmplitude">10</output>
+                </div>
+
+                <div>
+                    <label for="frequencia">Frequência</label>
+                    <input 
+                        type="range" 
+                        id="frequencia" 
+                        min="0" 
+                        max="6" 
+                        step="0.1"
+                        value="0.5" 
+                        oninput="valorFrequencia.textContent = this.value"
+                    />
+                    <output id="valorFrequencia">0.5</output>
+                </div>
+            </fieldset>
+        </div>
+    </main>
+
+    <script src="terreno/Algoritmo.js"></script>
+    <script src="terreno/TerrenoIsometrico.js"></script>
+    <script src="terreno/GerarTerreno.js"></script>
+    <script src="main.js"></script>
+</body>
+</html>
