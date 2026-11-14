@@ -69,13 +69,19 @@ function ajustarCanvas() {
 
 ajustarCanvas();
 
-let terreno = new GerarTerreno(caneta);
+const padEl = document.getElementById('directional-pad');
+const joystick = new Joystick(padEl);
+let terreno = new GerarTerreno(caneta, joystick);
+
+// duplo clique no joystick volta para a vista isométrica original
+padEl.addEventListener('dblclick', () => terreno.resetarVista());
+//let personagem = new Personagem(caneta, teclado);
 
 function inicializar(){
     caneta.clearRect(0, 0, canvas.width, canvas.height);
 
-    terreno.display();
     terreno.desenhar();
+    //personagem.desenhar();
     
     requestAnimationFrame(inicializar)
 }
