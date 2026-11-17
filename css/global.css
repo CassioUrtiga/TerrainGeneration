@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');
 
 * {
     box-sizing: border-box;
@@ -14,7 +14,6 @@ body {
     overflow: hidden;
     font-family: 'Poppins', sans-serif;
     color: #f1f5f9;
-    /* Fundo escuro com gradiente radial moderno */
     background: radial-gradient(circle at center, #1e293b 0%, #0f172a 100%);
 }
 
@@ -24,87 +23,170 @@ main {
     flex-direction: row;
     justify-content: center;
     align-items: center;
-    gap: 24px;
+    gap: 28px;
     padding: 20px;
 }
 
-/* Estilização do painel lateral / controles */
-fieldset {
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 16px;
-    padding: 20px 24px;
-    background: rgba(30, 41, 59, 0.65);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+/* Coluna direita (painel + joystick) */
+main > div:last-child {
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    align-items: center;
+    gap: 16px;
+    width: 280px;
 }
 
-fieldset legend {
-    text-align: center;
-    padding: 4px 14px;
-    font-weight: 700;
-    font-size: 0.9rem;
-    text-transform: uppercase;
-    letter-spacing: 1.5px;
-    color: #38bdf8;
-    background: #0f172a;
-    border: 1px solid rgba(56, 189, 248, 0.3);
-    border-radius: 20px;
-}
-
-/* Tela principal do jogo (Canvas) */
+/* Tela principal (Canvas) */
 #tela {
+    display: block;
     background-color: rgba(15, 23, 42, 0.85);
     border-radius: 16px;
     border: 2px solid rgba(56, 189, 248, 0.35);
     box-shadow: 
-        0 0 25px rgba(56, 189, 248, 0.15),
-        0 20px 40px rgba(0, 0, 0, 0.6);
+        0 0 28px rgba(56, 189, 248, 0.14),
+        0 20px 45px rgba(0, 0, 0, 0.65);
     transition: box-shadow 0.3s ease;
 }
 
 #tela:hover {
     box-shadow: 
-        0 0 35px rgba(56, 189, 248, 0.25),
-        0 20px 40px rgba(0, 0, 0, 0.6);
+        0 0 36px rgba(56, 189, 248, 0.24),
+        0 20px 45px rgba(0, 0, 0, 0.65);
 }
 
-/* Estilização de botões comuns (caso tenha no HTML) */
-button {
-    padding: 10px 18px;
-    border: none;
-    border-radius: 10px;
-    background: linear-gradient(135deg, #38bdf8 0%, #2563eb 100%);
-    color: #ffffff;
-    font-family: inherit;
+/* Painel Configurar */
+fieldset {
+    width: 100%;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 16px;
+    padding: 20px 22px;
+    background: rgba(30, 41, 59, 0.65);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+fieldset legend {
+    text-align: center;
+    padding: 4px 16px;
+    font-weight: 700;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: #38bdf8;
+    background: #0f172a;
+    border: 1px solid rgba(56, 189, 248, 0.35);
+    border-radius: 20px;
+}
+
+/* Cada bloco de controle dentro do fieldset */
+fieldset > div {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px 10px;
+}
+
+/* Rótulos dos sliders */
+fieldset label:not(.switch) {
+    font-size: 0.88rem;
+    font-weight: 500;
+    color: #cbd5e1;
+}
+
+/* Valores numéricos (Velocidade, Amplitude, Frequência) */
+fieldset output {
+    font-size: 0.85rem;
     font-weight: 600;
-    font-size: 0.95rem;
+    color: #38bdf8;
+    min-width: 34px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Faz o slider ocupar a linha inteira abaixo do label e output */
+fieldset input[type="range"] {
+    order: 3;
+    width: 100%;
+    height: 6px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: #334155;
+    border-radius: 999px;
+    outline: none;
     cursor: pointer;
-    box-shadow: 0 4px 15px rgba(37, 99, 235, 0.35);
+    margin-top: 2px;
+}
+
+fieldset input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #38bdf8;
+    border: 2px solid #f8fafc;
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.65);
+    cursor: pointer;
     transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 
-button:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(56, 189, 248, 0.5);
+fieldset input[type="range"]::-webkit-slider-thumb:hover {
+    transform: scale(1.18);
+    box-shadow: 0 0 14px rgba(56, 189, 248, 0.95);
 }
 
-button:active {
-    transform: translateY(0);
+fieldset input[type="range"]::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #38bdf8;
+    border: 2px solid #f8fafc;
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.65);
+    cursor: pointer;
 }
 
-/* Switch moderno aprimorado */
+/* Esconde o <br> do bloco do Algoritmo para não quebrar o flex */
+fieldset > div br {
+    display: none;
+}
+
+/* Nome do Algoritmo centralizado embaixo do slider */
+#valorAlgoritmo {
+    order: 4;
+    width: 100%;
+    text-align: center;
+    margin-top: 4px;
+    padding: 4px 10px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #e0f2fe;
+    background: rgba(56, 189, 248, 0.12);
+    border: 1px solid rgba(56, 189, 248, 0.25);
+    border-radius: 8px;
+    letter-spacing: 0.3px;
+}
+
+/* Linha do switch Personagem */
+fieldset > div:last-child {
+    padding-top: 6px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
 .switch {
     display: inline-flex;
     align-items: center;
     justify-content: space-between;
+    width: 100%;
     gap: 12px;
     cursor: pointer;
     user-select: none;
-    font-size: 0.95rem;
+    font-size: 0.9rem;
+    font-weight: 500;
     color: #e2e8f0;
 }
 
@@ -134,7 +216,7 @@ button:active {
     height: 16px;
     border-radius: 50%;
     background: #cbd5e1;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.35);
     transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), background 0.25s ease;
 }
 

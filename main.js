@@ -1,5 +1,5 @@
 let canvas = document.getElementById('tela');
-let caneta = canvas.getContext('2d');
+let caneta = canvas.getContext('2d', { alpha: false });
 
 const teclado = {
     cima: false,
@@ -45,13 +45,19 @@ const padEl = document.getElementById('directional-pad');
 const joystick = new Joystick(padEl);
 const personagem = new Personagem(caneta, teclado);
 const checkPersonagem = document.getElementById('personagemAtivo');
+if (!checkPersonagem) {
+    console.warn('Switch #personagemAtivo não encontrado no HTML: personagem ligado por padrão.');
+}
+const personagemLigado = () => (checkPersonagem ? checkPersonagem.checked : true);
 
 // se o switch estiver marcado o personagem entra no terreno; senão fica null
-let terreno = new GerarTerreno(caneta, joystick, checkPersonagem.checked ? personagem : null);
+let terreno = new GerarTerreno(caneta, joystick, personagemLigado() ? personagem : null);
 
-checkPersonagem.addEventListener('change', () => {
-    terreno.definirPersonagem(checkPersonagem.checked ? personagem : null);
-});
+if (checkPersonagem) {
+    checkPersonagem.addEventListener('change', () => {
+        terreno.definirPersonagem(personagemLigado() ? personagem : null);
+    });
+}
 
 // duplo clique no joystick volta para a vista isométrica original
 padEl.addEventListener('dblclick', () => terreno.resetarVista());
