@@ -4,27 +4,29 @@ class GerarTerreno {
         this.joystick = joystick;
 
         this.tipoTerreno = 0;
-        this.linhas = 30;
-        this.colunas = 25;
-
         this.velocidadeRotacao = 0.05;
         this.zonaMorta = 0.05;
 
+        // elementos do painel buscados uma vez (e não a cada frame)
+        this.elAlgoritmo = document.getElementById("algoritmo");
+        this.elVelocidade = document.getElementById("velocidade");
+        this.elAmplitude = document.getElementById("amplitude");
+        this.elFrequencia = document.getElementById("frequencia");
+
         this.terrenos = [
-            new TerrenoIsometrico(this.caneta, this.linhas, this.colunas),
+            new TerrenoIsometrico(this.caneta),
         ];
 
-        // o personagem é atualizado e desenhado dentro do terreno (colisão + profundidade)
         for (const terreno of this.terrenos) terreno.personagem = personagem;
     }
 
     desenhar() {
         const terrenoAtual = this.terrenos[this.tipoTerreno];
 
-        terrenoAtual.setAlgoritmoTerreno = parseInt(document.getElementById("algoritmo").value);
-        terrenoAtual.setVelocidade = parseFloat(document.getElementById("velocidade").value);
-        terrenoAtual.setAmplitude = parseInt(document.getElementById("amplitude").value);
-        terrenoAtual.setFrequencia = parseFloat(document.getElementById("frequencia").value);
+        terrenoAtual.setAlgoritmoTerreno = parseInt(this.elAlgoritmo.value);
+        terrenoAtual.setVelocidade = parseFloat(this.elVelocidade.value);
+        terrenoAtual.setAmplitude = parseInt(this.elAmplitude.value);
+        terrenoAtual.setFrequencia = parseFloat(this.elFrequencia.value);
 
         if (this.joystick) {
             const x = Math.abs(this.joystick.x) > this.zonaMorta ? this.joystick.x : 0;

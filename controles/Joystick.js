@@ -54,6 +54,9 @@ class Joystick {
 
     renderizar() {
         const { x, y } = this;
+        if (x === this._ultX && y === this._ultY) return; // nada mudou: não toca no DOM
+        this._ultX = x;
+        this._ultY = y;
         this.el.style.setProperty("--x-value", x);
         this.el.style.setProperty("--y-value", y);
 

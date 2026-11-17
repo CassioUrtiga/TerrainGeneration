@@ -4,11 +4,18 @@ class Personagem {
         this.teclado = teclado;
 
         this.img = new Image();
+        this.imgErro = false;
+        this.img.onerror = () => {
+            this.imgErro = true;
+            console.error("Personagem: não foi possível carregar a imagem", this.img.src);
+        };
         this.img.src = "personagem/avatar.png";
 
-        this.escala = 0.30;
-        this.offsetPes = 2;
+        this.escala = 0.27;
+        this.offsetPes = 2;       // ajuste fino: sobe/desce o sprite para os pés tocarem o tile
 
+        // Posição em coordenadas de grade (i = linha, j = coluna, podem ser fracionárias)
+        // e altura z (mesma unidade do mundo do terreno)
         this.gx = null;
         this.gy = null;
         this.z = 0;
@@ -34,25 +41,24 @@ class Personagem {
     }
 
     posicionarInicio(terreno) {
-        this.gx = Math.floor(terreno.linhas / 2);
-        this.gy = Math.floor(terreno.colunas / 2);
+        this.gx = 0;
+        this.gy = 0;
         this.z = terreno.alturaTile(this.gx, this.gy);
     }
 
-    // Tiles tocados pela pegada do personagem; null se sair do mapa
+    // Tiles tocados pela pegada do personagem (o mundo é infinito, sem limites)
     tilesPegada(terreno, gx, gy) {
         const r = this.raio;
         const cantos = [[gx - r, gy - r], [gx + r, gy - r], [gx + r, gy + r], [gx - r, gy + r]];
         const tiles = [];
         for (const [px, py] of cantos) {
             const i = Math.round(px), j = Math.round(py);
-            if (i < 0 || i >= terreno.linhas || j < 0 || j >= terreno.colunas) return null;
             tiles.push([i, j]);
         }
         return tiles;
     }
 
-    // Colisão: dentro do mapa e sem degrau alto demais
+    // Colisão: bloqueia degraus altos demais
     livre(terreno, gx, gy) {
         const tiles = this.tilesPegada(terreno, gx, gy);
         if (!tiles) return false;
@@ -126,6 +132,12 @@ class Personagem {
             this.alternaSprite = this.numSprite * tamX;
         }
 
+        if (this.imgErro) {
+            // marcador provisório para o personagem continuar visível sem a imagem
+            this.caneta.fillStyle = "#e74c3c";
+            this.caneta.fillRect(px - 5, py - 18, 10, 18);
+            return;
+        }
         if (!img.complete || img.naturalWidth === 0) return;
 
         const larguraFinal = tamX * this.escala;
