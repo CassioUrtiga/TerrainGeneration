@@ -1,23 +1,154 @@
-body{
-    display: flex;
-    justify-content: center;
-    overflow-y: hidden;
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap');
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
 }
 
-main{
+body {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    overflow: hidden;
+    font-family: 'Poppins', sans-serif;
+    color: #f1f5f9;
+    /* Fundo escuro com gradiente radial moderno */
+    background: radial-gradient(circle at center, #1e293b 0%, #0f172a 100%);
+}
+
+main {
     display: flex;
     flex-wrap: nowrap;
     flex-direction: row;
     justify-content: center;
     align-items: center;
-    gap: 0px 10px;
-    height: 100vh;
+    gap: 24px;
+    padding: 20px;
 }
 
-fieldset legend{
+/* Estilização do painel lateral / controles */
+fieldset {
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 16px;
+    padding: 20px 24px;
+    background: rgba(30, 41, 59, 0.65);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+fieldset legend {
     text-align: center;
+    padding: 4px 14px;
+    font-weight: 700;
+    font-size: 0.9rem;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: #38bdf8;
+    background: #0f172a;
+    border: 1px solid rgba(56, 189, 248, 0.3);
+    border-radius: 20px;
 }
 
-#tela{
-    background-color: rgba(0, 0, 0, 0.378);
+/* Tela principal do jogo (Canvas) */
+#tela {
+    background-color: rgba(15, 23, 42, 0.85);
+    border-radius: 16px;
+    border: 2px solid rgba(56, 189, 248, 0.35);
+    box-shadow: 
+        0 0 25px rgba(56, 189, 248, 0.15),
+        0 20px 40px rgba(0, 0, 0, 0.6);
+    transition: box-shadow 0.3s ease;
+}
+
+#tela:hover {
+    box-shadow: 
+        0 0 35px rgba(56, 189, 248, 0.25),
+        0 20px 40px rgba(0, 0, 0, 0.6);
+}
+
+/* Estilização de botões comuns (caso tenha no HTML) */
+button {
+    padding: 10px 18px;
+    border: none;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #38bdf8 0%, #2563eb 100%);
+    color: #ffffff;
+    font-family: inherit;
+    font-weight: 600;
+    font-size: 0.95rem;
+    cursor: pointer;
+    box-shadow: 0 4px 15px rgba(37, 99, 235, 0.35);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(56, 189, 248, 0.5);
+}
+
+button:active {
+    transform: translateY(0);
+}
+
+/* Switch moderno aprimorado */
+.switch {
+    display: inline-flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    cursor: pointer;
+    user-select: none;
+    font-size: 0.95rem;
+    color: #e2e8f0;
+}
+
+.switch input {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.switch .slider {
+    position: relative;
+    width: 46px;
+    height: 24px;
+    border-radius: 24px;
+    background: #334155;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    transition: background 0.25s ease, box-shadow 0.25s ease;
+}
+
+.switch .slider::before {
+    content: "";
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #cbd5e1;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), background 0.25s ease;
+}
+
+.switch input:checked + .slider {
+    background: linear-gradient(135deg, #38bdf8 0%, #3b82f6 100%);
+    box-shadow: 0 0 12px rgba(56, 189, 248, 0.45);
+}
+
+.switch input:checked + .slider::before {
+    transform: translateX(22px);
+    background: #ffffff;
+}
+
+.switch input:focus-visible + .slider {
+    outline: 2px solid #38bdf8;
+    outline-offset: 2px;
 }

@@ -9,80 +9,57 @@ const teclado = {
     space: false,
 }
 
-window.addEventListener('keydown', (evt) =>{
-    switch (keyPressed(evt)){
-        case '&':
-            teclado.cima = true;
-            break;
-        case '(':
-            teclado.baixo = true;
-            break;
-        case "'":
-            teclado.direita = true;
-            break;
-        case '%':
-            teclado.esquerda = true;
-            break;
-        case ' ':
-            teclado.space = true;
-            break;
-        default:
-            break;
-    }
-})
-
-window.addEventListener('keyup', (evt) =>{
-    switch (keyPressed(evt)){
-        case '&':
-            teclado.cima = false;
-            break;
-        case '(':
-            teclado.baixo = false;
-            break;
-        case "'":
-            teclado.direita = false;
-            break;
-        case '%':
-            teclado.esquerda = false;
-            break;
-        case ' ':
-            teclado.space = false;
-            break;
-        default:
-            break;
-    }
-})
-
-function keyPressed(evt){
-    evt = evt || window.event;
-    var key = evt.keyCode || evt.which;
-    return String.fromCharCode(key); 
+// Setas ou WASD
+const mapaTeclas = {
+    ArrowUp: 'cima',       KeyW: 'cima',
+    ArrowDown: 'baixo',    KeyS: 'baixo',
+    ArrowRight: 'direita', KeyD: 'direita',
+    ArrowLeft: 'esquerda', KeyA: 'esquerda',
+    Space: 'space',
 }
+
+function atualizarTecla(evt, valor) {
+    const tecla = mapaTeclas[evt.code];
+    if (!tecla) return;
+    teclado[tecla] = valor;
+    evt.preventDefault(); // evita rolar a página / mexer nos sliders
+}
+
+window.addEventListener('keydown', (evt) => atualizarTecla(evt, true));
+window.addEventListener('keyup', (evt) => atualizarTecla(evt, false));
+window.addEventListener('blur', () => {
+    for (const k in teclado) teclado[k] = false;
+});
 
 function ajustarCanvas() {
     canvas.width = window.innerWidth - 500;
     canvas.height = window.innerHeight - 40;
 }
 
-
 // ============ Inicialização do jogo ============
 
 ajustarCanvas();
+window.addEventListener('resize', ajustarCanvas);
 
 const padEl = document.getElementById('directional-pad');
 const joystick = new Joystick(padEl);
-let terreno = new GerarTerreno(caneta, joystick);
+const personagem = new Personagem(caneta, teclado);
+const checkPersonagem = document.getElementById('personagemAtivo');
+
+// se o switch estiver marcado o personagem entra no terreno; senão fica null
+let terreno = new GerarTerreno(caneta, joystick, checkPersonagem.checked ? personagem : null);
+
+checkPersonagem.addEventListener('change', () => {
+    terreno.definirPersonagem(checkPersonagem.checked ? personagem : null);
+});
 
 // duplo clique no joystick volta para a vista isométrica original
 padEl.addEventListener('dblclick', () => terreno.resetarVista());
-//let personagem = new Personagem(caneta, teclado);
 
-function inicializar(){
-    caneta.clearRect(0, 0, canvas.width, canvas.height);
-
+function inicializar() {
+    // o terreno limpa o canvas e desenha o personagem junto com os tiles
     terreno.desenhar();
-    //personagem.desenhar();
-    
+
     requestAnimationFrame(inicializar)
 }
 

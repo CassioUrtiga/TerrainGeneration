@@ -1,5 +1,5 @@
 class GerarTerreno {
-    constructor(caneta, joystick = null) {
+    constructor(caneta, joystick = null, personagem = null) {
         this.caneta = caneta;
         this.joystick = joystick;
 
@@ -7,12 +7,15 @@ class GerarTerreno {
         this.linhas = 30;
         this.colunas = 25;
 
-        this.velocidadeRotacao = 0.05; // rad/frame com o joystick no limite
+        this.velocidadeRotacao = 0.05;
         this.zonaMorta = 0.05;
 
         this.terrenos = [
             new TerrenoIsometrico(this.caneta, this.linhas, this.colunas),
         ];
+
+        // o personagem é atualizado e desenhado dentro do terreno (colisão + profundidade)
+        for (const terreno of this.terrenos) terreno.personagem = personagem;
     }
 
     desenhar() {
@@ -26,11 +29,14 @@ class GerarTerreno {
         if (this.joystick) {
             const x = Math.abs(this.joystick.x) > this.zonaMorta ? this.joystick.x : 0;
             const y = Math.abs(this.joystick.y) > this.zonaMorta ? this.joystick.y : 0;
-            // x -> gira para os lados | y (arrastar p/ baixo) -> vê mais de cima
             terrenoAtual.rotacionar(-x * this.velocidadeRotacao, y * this.velocidadeRotacao);
         }
 
         terrenoAtual.desenhar();
+    }
+
+    definirPersonagem(personagem) {
+        for (const terreno of this.terrenos) terreno.personagem = personagem;
     }
 
     resetarVista() {

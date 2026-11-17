@@ -13,20 +13,28 @@ class TerrenoIsometrico {
         this.velocidade = 0.03;
 
         // Câmera 3D (os valores iniciais reproduzem a vista isométrica original)
-        this.yaw = Math.PI / 4;                    // giro horizontal (rad)
-        this.pitch = Math.atan(1 / Math.SQRT2);    // inclinação vertical (~35,26°)
-        this.pitchMin = 0.12;                      // quase de lado
-        this.pitchMax = 1.5;                       // quase de cima
+        this.yaw = Math.PI / 4;
+        this.pitch = Math.atan(1 / Math.SQRT2);
+        this.pitchMin = 0.12;
+        this.pitchMax = 1.5;
 
         // Geometria
-        this.tamanhoTile = 23.57;  // lado do tile no mundo (px)
-        this.escalaAltura = 1.2;   // multiplicador da altura das colunas
+        this.tamanhoTile = 25;
+        this.escalaAltura = 1.2;
         this.corLado = "rgb(120, 90, 60)";
 
         this.tempo = 0;
+
+        // Personagem e alturas (z no mundo) de cada tile no frame atual
+        this.personagem = null;
+        this.alturas = new Float32Array(linhas * colunas);
     }
 
-    // dYaw / dPitch em radianos
+    // Altura (z do mundo) do tile (i, j) neste frame
+    alturaTile(i, j) {
+        return this.alturas[i * this.colunas + j];
+    }
+
     rotacionar(dYaw, dPitch) {
         this.yaw = (this.yaw + dYaw) % (Math.PI * 2);
         this.pitch = Math.max(this.pitchMin, Math.min(this.pitchMax, this.pitch + dPitch));
@@ -45,7 +53,6 @@ class TerrenoIsometrico {
         ctx.closePath();
         ctx.fillStyle = cor;
         ctx.fill();
-        // contorno da mesma cor para esconder frestas entre polígonos
         ctx.strokeStyle = cor;
         ctx.lineWidth = 0.6;
         ctx.stroke();
@@ -63,6 +70,8 @@ class TerrenoIsometrico {
         const cosP = Math.cos(this.pitch), sinP = Math.sin(this.pitch);
         const s = this.tamanhoTile;
         const meio = s / 2;
+        const mundoX = (i) => (i - (this.linhas - 1) / 2) * s;
+        const mundoY = (j) => (j - (this.colunas - 1) / 2) * s;
 
         // mundo (x, y, z) -> tela [sx, sy]
         const proj = (x, y, z) => [
@@ -70,27 +79,48 @@ class TerrenoIsometrico {
             cy + (x * sinA + y * cosA) * sinP - z * cosP,
         ];
 
-        // 1) calcula alturas e profundidade de cada tile
-        const tiles = [];
+        // 1) alturas de cada tile
+        const itens = [];
         for (let i = 0; i < this.linhas; i++) {
             for (let j = 0; j < this.colunas; j++) {
-                const wx = (i - (this.linhas - 1) / 2) * s;
-                const wy = (j - (this.colunas - 1) / 2) * s;
+                const wx = mundoX(i);
+                const wy = mundoY(j);
                 const h = Math.max(0, this.algoritmo.algoritmo(
                     i, j, this.algoritmoTerreno, this.frequencia, this.tempo, this.amplitude
                 ));
-                tiles.push({ wx, wy, h, prof: wx * sinA + wy * cosA });
+                this.alturas[i * this.colunas + j] = h * this.escalaAltura;
+                itens.push({ wx, wy, h, prof: wx * sinA + wy * cosA });
             }
         }
 
-        // 2) algoritmo do pintor: do mais distante para o mais próximo
-        tiles.sort((a, b) => a.prof - b.prof);
+        // 2) personagem: movimento/colisão e entrada na ordenação de profundidade
+        const p = this.personagem;
+        if (p) {
+            p.atualizar(this, this.yaw);
+            // usa a profundidade do tile em que ele está (+ épsilon) para ser
+            // sempre desenhado logo depois do próprio tile
+            const ti = Math.max(0, Math.min(this.linhas - 1, Math.round(p.gx)));
+            const tj = Math.max(0, Math.min(this.colunas - 1, Math.round(p.gy)));
+            itens.push({
+                personagem: true,
+                prof: mundoX(ti) * sinA + mundoY(tj) * cosA + 0.001,
+            });
+        }
+
+        // 3) algoritmo do pintor: do mais distante para o mais próximo
+        itens.sort((a, b) => a.prof - b.prof);
 
         const cantos = [[-meio, -meio], [meio, -meio], [meio, meio], [-meio, meio]];
-        const normais = [[0, -1], [1, 0], [0, 1], [-1, 0]]; // normal da aresta k -> k+1
+        const normais = [[0, -1], [1, 0], [0, 1], [-1, 0]];
 
-        // 3) desenha
-        for (const t of tiles) {
+        // 4) desenha
+        for (const t of itens) {
+            if (t.personagem) {
+                const [sx, sy] = proj(mundoX(p.gx), mundoY(p.gy), p.z);
+                p.desenharEm(sx, sy, sinP);
+                continue;
+            }
+
             const z = t.h * this.escalaAltura;
             const topo = cantos.map(([dx, dy]) => proj(t.wx + dx, t.wy + dy, z));
 
@@ -99,7 +129,7 @@ class TerrenoIsometrico {
                 for (let k = 0; k < 4; k++) {
                     const [nx, ny] = normais[k];
                     const n1y = nx * sinA + ny * cosA;
-                    if (n1y <= 0) continue; // face de costas para a câmera
+                    if (n1y <= 0) continue;
 
                     const n1x = nx * cosA - ny * sinA;
                     const fator = Math.max(0, Math.min(0.4, 0.12 + 0.13 * n1x));
