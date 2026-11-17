@@ -43,10 +43,35 @@ class TerrenoIsometrico {
         this.rowMin = new Int32Array(0);
         this.rowMax = new Int32Array(0);
 
-        // paleta pré-calculada: cor do topo por altura (passo de 0,5)
-        this.indicePorZ = 2 / this.escalaAltura;
-        this.paleta = [];
-        for (let n = 0; n <= 700; n++) this.paleta.push(this.alturaCor(n / 2));
+        // paletas pré-calculadas (256 cores por paleta, indexadas pela altura relativa)
+        this.paletas = {};
+        for (const nome in Algoritmo.paletas) {
+            this.paletas[nome] = this.criarPaleta(Algoritmo.paletas[nome]);
+        }
+        this.bufCor = new Uint8Array(0);        // índice de cor de cada tile no frame
+    }
+
+    // paradas: [[altura relativa 0..1, [r, g, b]], ...]  ->  256 cores "rgb(...)"
+    criarPaleta(paradas) {
+        const pal = [];
+        for (let n = 0; n < 256; n++) {
+            const f = n / 255;
+            let c = paradas[paradas.length - 1][1];
+            if (f <= paradas[0][0]) {
+                c = paradas[0][1];
+            } else {
+                for (let k = 0; k < paradas.length - 1; k++) {
+                    const [f0, c0] = paradas[k], [f1, c1] = paradas[k + 1];
+                    if (f >= f0 && f < f1) {
+                        const u = (f - f0) / (f1 - f0);
+                        c = [0, 1, 2].map((q) => Math.round(c0[q] + (c1[q] - c0[q]) * u));
+                        break;
+                    }
+                }
+            }
+            pal.push(`rgb(${c[0]},${c[1]},${c[2]})`);
+        }
+        return pal;
     }
 
     chave(i, j) {
@@ -55,10 +80,10 @@ class TerrenoIsometrico {
 
     // Altura "pura" do terreno em (i, j) — i e j podem ser negativos
     alturaBruta(i, j) {
-        const v = this.algoritmo.algoritmo(
+        const v = this.algoritmo.altura(
             i, j, this.algoritmoTerreno, this.frequencia, this.tempo, this.amplitude
         );
-        return Number.isFinite(v) ? Math.max(0, v) : 0;
+        return v > 0 ? v : 0; // negativos e NaN viram 0
     }
 
     // 0..1: quanto o tile já cresceu (sem registro = tile "antigo", já crescido)
@@ -160,13 +185,22 @@ class TerrenoIsometrico {
         const nLin = i1 - i0 + 1;
 
         const tam = nI * nJ;
-        if (this.bufAlt.length < tam) this.bufAlt = new Float32Array((tam * 1.3) | 0);
+        if (this.bufAlt.length < tam) {
+            this.bufAlt = new Float32Array((tam * 1.3) | 0);
+            this.bufCor = new Uint8Array(this.bufAlt.length);
+        }
         if (this.rowMin.length < nLin) {
             this.rowMin = new Int32Array(nLin * 2);
             this.rowMax = new Int32Array(nLin * 2);
         }
         const alt = this.bufAlt;
+        const cores = this.bufCor;
         alt.fill(NaN, 0, tam);
+
+        // paleta do terreno atual
+        const tipoInfo = Algoritmo.tipos[this.algoritmoTerreno] || Algoritmo.tipos[0];
+        const paletaAtiva = this.paletas[tipoInfo.paleta];
+        const invPal = this.amplitude > 0 ? 255 / (this.amplitude * 2) : 0;
         const rowMin = this.rowMin, rowMax = this.rowMax;
 
         // ---- 3) alturas (uma passada) + geração dos tiles ----
@@ -209,10 +243,12 @@ class TerrenoIsometrico {
 
                 if (info) {
                     info.visto = quadro;
-                    const e = this.crescimento(info);
-                    alt[base + j] = e === 0 ? 0 : this.alturaBruta(i, j) * e * esc;
+                    const bruta = this.alturaBruta(i, j);
+                    alt[base + j] = bruta * this.crescimento(info) * esc;
+                    cores[base + j] = Math.min(255, (bruta * invPal) | 0);
                 } else {
                     alt[base + j] = 0; // ainda não nasceu: chão plano
+                    cores[base + j] = 0;
                 }
             }
         }
@@ -241,9 +277,6 @@ class TerrenoIsometrico {
         }
         const viz = [-1, nJ, 1, -nJ];   // deslocamento no buffer até o vizinho de cada face
 
-        const paleta = this.paleta;
-        const maxPal = paleta.length - 1;
-        const indicePorZ = this.indicePorZ;
         const ti = p ? Math.round(p.gx) : 0;
         const tj = p ? Math.round(p.gy) : 0;
         let corAtual = null;
@@ -291,9 +324,7 @@ class TerrenoIsometrico {
                 }
 
                 // topo
-                let pi = (z * indicePorZ) | 0;
-                if (pi > maxPal) pi = maxPal;
-                const cor = paleta[pi];
+                const cor = paletaAtiva[cores[idx]];
                 if (cor !== corAtual) { ctx.fillStyle = cor; corAtual = cor; }
                 ctx.beginPath();
                 ctx.moveTo(sx + ox[0], syTopo + oy[0]);
@@ -324,12 +355,6 @@ class TerrenoIsometrico {
 
         this.quadro++;
         this.tempo += this.velocidade;
-    }
-
-    alturaCor(altura) {
-        const verde = Math.max(0, Math.min(255, 100 + altura * 3));
-        const r = Math.max(0, Math.min(255, 50 + altura * 0.5));
-        return `rgb(${Math.floor(r)},${Math.floor(verde)},50)`;
     }
 
     set setAmplitude(valor) { this.amplitude = valor; }
