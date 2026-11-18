@@ -19,6 +19,13 @@
                 <legend>Configurar</legend>
 
                 <div>
+                    <label for="algoritmo">Algoritmo</label>
+                    <input type="range" id="algoritmo" min="0" max="7" value="0"
+                        oninput="valorAlgoritmo.textContent = Algoritmo.nomes[this.value]" />
+                    <output id="valorAlgoritmo">Colinas</output>
+                </div>
+
+                <div>
                     <label for="velocidade">Velocidade</label>
                     <input type="range" id="velocidade" min="0" max="1" step="0.01" value="0"
                         oninput="valorVelocidade.textContent = this.value" />
@@ -26,16 +33,8 @@
                 </div>
 
                 <div>
-                    <label for="algoritmo">Algoritmo</label>
-                    <input type="range" id="algoritmo" min="0" max="7" value="0"
-                        oninput="valorAlgoritmo.textContent = Algoritmo.nomes[this.value]" />
-                    <br>
-                    <output id="valorAlgoritmo">Colinas</output>
-                </div>
-
-                <div>
                     <label for="amplitude">Amplitude</label>
-                    <input type="range" id="amplitude" min="0" max="100" value="30"
+                    <input type="range" id="amplitude" min="0" max="200" value="30"
                         oninput="valorAmplitude.textContent = this.value" />
                     <output id="valorAmplitude">30</output>
                 </div>
@@ -45,6 +44,13 @@
                     <input type="range" id="frequencia" min="0" max="6" step="0.1" value="0.5"
                         oninput="valorFrequencia.textContent = this.value" />
                     <output id="valorFrequencia">0.5</output>
+                </div>
+
+                <div>
+                    <label for="zoom">Zoom</label>
+                    <input type="range" id="zoom" min="0.7" max="3" step="0.05" value="1"
+                        oninput="valorZoom.textContent = this.value + '×'" />
+                    <output id="valorZoom">1×</output>
                 </div>
 
                 <div>

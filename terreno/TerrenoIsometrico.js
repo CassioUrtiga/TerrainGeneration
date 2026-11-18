@@ -33,6 +33,10 @@ class TerrenoIsometrico {
         this.duracaoGeracao = 45;
         this.ondaInicial = true;
 
+        // Zoom: o centro da tela (onde fica o personagem) é o ponto fixo
+        this.zoom = 1;          // valor atual (suavizado)
+        this.zoomAlvo = 1;      // valor pedido pelo slider
+
         this.tempo = 0;
         this.personagem = null;
 
@@ -137,11 +141,22 @@ class TerrenoIsometrico {
         const W = ctx.canvas.width;
         const H = ctx.canvas.height;
 
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.fillStyle = this.corFundo;
         ctx.fillRect(0, 0, W, H);
 
         const cx = W / 2;
         const cy = H / 2 + 20;
+
+        // zoom suave até o valor do slider, ao redor do centro (o personagem, se existir)
+        this.zoom += (this.zoomAlvo - this.zoom) * 0.15;
+        if (Math.abs(this.zoomAlvo - this.zoom) < 0.001) this.zoom = this.zoomAlvo;
+        const zoom = this.zoom;
+
+        // parte do mundo que aparece na tela, em coordenadas "sem zoom"
+        const vx0 = cx - cx / zoom, vx1 = cx + (W - cx) / zoom;
+        const vy0 = cy - cy / zoom, vy1 = cy + (H - cy) / zoom;
+        ctx.setTransform(zoom, 0, 0, zoom, cx * (1 - zoom), cy * (1 - zoom));
         const cosA = Math.cos(this.yaw), sinA = Math.sin(this.yaw);
         const cosP = Math.cos(this.pitch), sinP = Math.sin(this.pitch);
         const s = this.tamanhoTile;
@@ -166,8 +181,8 @@ class TerrenoIsometrico {
         // ---- 2) caixa de tiles que cobre a tela ----
         const marg = s * 2;
         const margemAltura = 40 + this.amplitude * esc * 1.2;
-        const xLo = -marg, xHi = W + marg;
-        const yLo = -marg, yHi = H + marg + margemAltura;
+        const xLo = vx0 - marg, xHi = vx1 + marg;
+        const yLo = vy0 - marg, yHi = vy1 + marg + margemAltura;
 
         let minI = Infinity, maxI = -Infinity, minJ = Infinity, maxJ = -Infinity;
         for (const ux of [xLo - cx, xHi - cx]) {
@@ -234,7 +249,7 @@ class TerrenoIsometrico {
                     const dy = (j - camY) * s;
                     const sx = cx + dx * cosA - dy * sinA;
                     const syB = c2base + (dx * sinA + dy * cosA) * sinP;
-                    if (sx > -s && sx < W + s && syB > -s && syB < H + s) {
+                    if (sx > vx0 - s && sx < vx1 + s && syB > vy0 - s && syB < vy1 + s) {
                         const atraso = this.ondaInicial ? Math.hypot(i - camX, j - camY) * 2 : 0;
                         info = { nasc: quadro + atraso, visto: quadro };
                         tiles.set(k, info);
@@ -353,10 +368,13 @@ class TerrenoIsometrico {
             }
         }
 
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+
         this.quadro++;
         this.tempo += this.velocidade;
     }
 
+    set setZoom(valor) { this.zoomAlvo = valor; }
     set setAmplitude(valor) { this.amplitude = valor; }
     set setFrequencia(valor) { this.frequencia = valor; }
     set setAlgoritmoTerreno(valor) { this.algoritmoTerreno = valor; }
