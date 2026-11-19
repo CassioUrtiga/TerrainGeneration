@@ -13,6 +13,14 @@
     <main>
         <div>
             <canvas id="tela"></canvas>
+
+            <!-- Joystick virtual: arraste para girar o terreno (duplo clique = resetar vista) -->
+            <div id="directional-pad" class="directional-pad" title="Arraste para girar · duplo clique para resetar">
+                <div class="circle">
+                    <div class="horizontal-line" data-direction="1"></div>
+                    <div class="vertical-line" data-direction="1"></div>
+                </div>
+            </div>
         </div>
         <div>
             <fieldset>
@@ -60,19 +68,20 @@
                         <span class="slider"></span>
                     </label>
                 </div>
-            </fieldset>
 
-            <!-- Joystick virtual: arraste para girar o terreno (duplo clique = resetar vista) -->
-            <div id="directional-pad" class="directional-pad" title="Arraste para girar · duplo clique para resetar">
-                <div class="circle">
-                    <div class="horizontal-line" data-direction="1"></div>
-                    <div class="vertical-line" data-direction="1"></div>
+                <div>
+                    <label class="switch">
+                        Obstáculos
+                        <input type="checkbox" id="obstaculosAtivos" autocomplete="off">
+                        <span class="slider"></span>
+                    </label>
                 </div>
-            </div>
+            </fieldset>
         </div>
     </main>
 
     <script src="terreno/Algoritmo.js"></script>
+    <script src="terreno/Obstaculos.js"></script>
     <script src="terreno/TerrenoIsometrico.js"></script>
     <script src="terreno/GerarTerreno.js"></script>
     <script src="controles/Joystick.js"></script>

@@ -13,6 +13,7 @@ class GerarTerreno {
         this.elAmplitude = document.getElementById("amplitude");
         this.elFrequencia = document.getElementById("frequencia");
         this.elZoom = document.getElementById("zoom");
+        this.elObstaculos = document.getElementById("obstaculosAtivos");
 
         this.terrenos = [
             new TerrenoIsometrico(this.caneta),
@@ -30,6 +31,7 @@ class GerarTerreno {
         terrenoAtual.setFrequencia = parseFloat(this.elFrequencia.value);
 
         if (this.elZoom) terrenoAtual.setZoom = parseFloat(this.elZoom.value);
+        if (this.elObstaculos) terrenoAtual.setObstaculos = this.elObstaculos.checked;
 
         if (this.joystick) {
             const x = Math.abs(this.joystick.x) > this.zonaMorta ? this.joystick.x : 0;
