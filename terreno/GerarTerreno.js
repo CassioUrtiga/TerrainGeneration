@@ -12,6 +12,8 @@ class GerarTerreno {
         this.elVelocidade = document.getElementById("velocidade");
         this.elAmplitude = document.getElementById("amplitude");
         this.elFrequencia = document.getElementById("frequencia");
+        this.elZoom = document.getElementById("zoom");
+        this.elObstaculos = document.getElementById("obstaculosAtivos");
 
         this.terrenos = [
             new TerrenoIsometrico(this.caneta),
@@ -28,6 +30,9 @@ class GerarTerreno {
         terrenoAtual.setAmplitude = parseInt(this.elAmplitude.value);
         terrenoAtual.setFrequencia = parseFloat(this.elFrequencia.value);
 
+        if (this.elZoom) terrenoAtual.setZoom = parseFloat(this.elZoom.value);
+        if (this.elObstaculos) terrenoAtual.setObstaculos = this.elObstaculos.checked;
+
         if (this.joystick) {
             const x = Math.abs(this.joystick.x) > this.zonaMorta ? this.joystick.x : 0;
             const y = Math.abs(this.joystick.y) > this.zonaMorta ? this.joystick.y : 0;
@@ -37,6 +42,7 @@ class GerarTerreno {
         terrenoAtual.desenhar();
     }
 
+    // personagem = instância para ligar, ou null para desligar
     definirPersonagem(personagem) {
         for (const terreno of this.terrenos) terreno.personagem = personagem;
     }

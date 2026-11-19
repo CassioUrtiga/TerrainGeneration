@@ -13,10 +13,25 @@
     <main>
         <div>
             <canvas id="tela"></canvas>
+
+            <!-- Joystick virtual: arraste para girar o terreno (duplo clique = resetar vista) -->
+            <div id="directional-pad" class="directional-pad" title="Arraste para girar · duplo clique para resetar">
+                <div class="circle">
+                    <div class="horizontal-line" data-direction="1"></div>
+                    <div class="vertical-line" data-direction="1"></div>
+                </div>
+            </div>
         </div>
         <div>
             <fieldset>
                 <legend>Configurar</legend>
+
+                <div>
+                    <label for="algoritmo">Algoritmo</label>
+                    <input type="range" id="algoritmo" min="0" max="7" value="0"
+                        oninput="valorAlgoritmo.textContent = Algoritmo.nomes[this.value]" />
+                    <output id="valorAlgoritmo">Colinas</output>
+                </div>
 
                 <div>
                     <label for="velocidade">Velocidade</label>
@@ -26,16 +41,8 @@
                 </div>
 
                 <div>
-                    <label for="algoritmo">Algoritmo</label>
-                    <input type="range" id="algoritmo" min="0" max="7" value="0"
-                        oninput="valorAlgoritmo.textContent = Algoritmo.nomes[this.value]" />
-                    <br>
-                    <output id="valorAlgoritmo">Colinas</output>
-                </div>
-
-                <div>
                     <label for="amplitude">Amplitude</label>
-                    <input type="range" id="amplitude" min="0" max="100" value="30"
+                    <input type="range" id="amplitude" min="0" max="200" value="30"
                         oninput="valorAmplitude.textContent = this.value" />
                     <output id="valorAmplitude">30</output>
                 </div>
@@ -48,25 +55,33 @@
                 </div>
 
                 <div>
+                    <label for="zoom">Zoom</label>
+                    <input type="range" id="zoom" min="0.7" max="3" step="0.05" value="1"
+                        oninput="valorZoom.textContent = this.value + '×'" />
+                    <output id="valorZoom">1×</output>
+                </div>
+
+                <div>
                     <label class="switch">
                         Personagem
                         <input type="checkbox" id="personagemAtivo" autocomplete="off">
                         <span class="slider"></span>
                     </label>
                 </div>
-            </fieldset>
 
-            <!-- Joystick virtual: arraste para girar o terreno (duplo clique = resetar vista) -->
-            <div id="directional-pad" class="directional-pad" title="Arraste para girar · duplo clique para resetar">
-                <div class="circle">
-                    <div class="horizontal-line" data-direction="1"></div>
-                    <div class="vertical-line" data-direction="1"></div>
+                <div>
+                    <label class="switch">
+                        Obstáculos
+                        <input type="checkbox" id="obstaculosAtivos" autocomplete="off">
+                        <span class="slider"></span>
+                    </label>
                 </div>
-            </div>
+            </fieldset>
         </div>
     </main>
 
     <script src="terreno/Algoritmo.js"></script>
+    <script src="terreno/Obstaculos.js"></script>
     <script src="terreno/TerrenoIsometrico.js"></script>
     <script src="terreno/GerarTerreno.js"></script>
     <script src="controles/Joystick.js"></script>

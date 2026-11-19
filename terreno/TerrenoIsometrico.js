@@ -33,6 +33,10 @@ class TerrenoIsometrico {
         this.duracaoGeracao = 45;
         this.ondaInicial = true;
 
+        // Zoom: o centro da tela (onde fica o personagem) é o ponto fixo
+        this.zoom = 1;          // valor atual (suavizado)
+        this.zoomAlvo = 1;      // valor pedido pelo slider
+
         this.tempo = 0;
         this.personagem = null;
 
@@ -49,6 +53,19 @@ class TerrenoIsometrico {
             this.paletas[nome] = this.criarPaleta(Algoritmo.paletas[nome]);
         }
         this.bufCor = new Uint8Array(0);        // índice de cor de cada tile no frame
+
+        // Obstáculos (decididos quando o tile nasce e guardados no registro dele)
+        this.obstaculos = new Obstaculos();
+        this.obstaculosAtivos = true;
+        this.bufObs = [];                       // obstáculo de cada tile no frame (ou null)
+        this.bufEsc = new Float32Array(0);      // quanto o tile já cresceu (0..1)
+    }
+
+    // O tile (i, j) tem um obstáculo que bloqueia a passagem?
+    temObstaculo(i, j) {
+        if (!this.obstaculosAtivos) return false;
+        const info = this.tiles.get(this.chave(i, j));
+        return !!(info && info.obst);
     }
 
     // paradas: [[altura relativa 0..1, [r, g, b]], ...]  ->  256 cores "rgb(...)"
@@ -137,11 +154,22 @@ class TerrenoIsometrico {
         const W = ctx.canvas.width;
         const H = ctx.canvas.height;
 
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.fillStyle = this.corFundo;
         ctx.fillRect(0, 0, W, H);
 
         const cx = W / 2;
         const cy = H / 2 + 20;
+
+        // zoom suave até o valor do slider, ao redor do centro (o personagem, se existir)
+        this.zoom += (this.zoomAlvo - this.zoom) * 0.15;
+        if (Math.abs(this.zoomAlvo - this.zoom) < 0.001) this.zoom = this.zoomAlvo;
+        const zoom = this.zoom;
+
+        // parte do mundo que aparece na tela, em coordenadas "sem zoom"
+        const vx0 = cx - cx / zoom, vx1 = cx + (W - cx) / zoom;
+        const vy0 = cy - cy / zoom, vy1 = cy + (H - cy) / zoom;
+        ctx.setTransform(zoom, 0, 0, zoom, cx * (1 - zoom), cy * (1 - zoom));
         const cosA = Math.cos(this.yaw), sinA = Math.sin(this.yaw);
         const cosP = Math.cos(this.pitch), sinP = Math.sin(this.pitch);
         const s = this.tamanhoTile;
@@ -165,9 +193,9 @@ class TerrenoIsometrico {
 
         // ---- 2) caixa de tiles que cobre a tela ----
         const marg = s * 2;
-        const margemAltura = 40 + this.amplitude * esc * 1.2;
-        const xLo = -marg, xHi = W + marg;
-        const yLo = -marg, yHi = H + marg + margemAltura;
+        const margemAltura = 70 + this.amplitude * esc * 1.2; // inclui a altura dos obstáculos
+        const xLo = vx0 - marg, xHi = vx1 + marg;
+        const yLo = vy0 - marg, yHi = vy1 + marg + margemAltura;
 
         let minI = Infinity, maxI = -Infinity, minJ = Infinity, maxJ = -Infinity;
         for (const ux of [xLo - cx, xHi - cx]) {
@@ -188,6 +216,8 @@ class TerrenoIsometrico {
         if (this.bufAlt.length < tam) {
             this.bufAlt = new Float32Array((tam * 1.3) | 0);
             this.bufCor = new Uint8Array(this.bufAlt.length);
+            this.bufEsc = new Float32Array(this.bufAlt.length);
+            this.bufObs = new Array(this.bufAlt.length).fill(null);
         }
         if (this.rowMin.length < nLin) {
             this.rowMin = new Int32Array(nLin * 2);
@@ -195,12 +225,17 @@ class TerrenoIsometrico {
         }
         const alt = this.bufAlt;
         const cores = this.bufCor;
+        const obsBuf = this.bufObs, escBuf = this.bufEsc;
         alt.fill(NaN, 0, tam);
+        obsBuf.fill(null, 0, tam);
 
         // paleta do terreno atual
         const tipoInfo = Algoritmo.tipos[this.algoritmoTerreno] || Algoritmo.tipos[0];
         const paletaAtiva = this.paletas[tipoInfo.paleta];
         const invPal = this.amplitude > 0 ? 255 / (this.amplitude * 2) : 0;
+        // quando tipo de terreno, frequência ou o switch mudam, os obstáculos são sorteados de novo
+        const sig = this.algoritmoTerreno * 100000 + Math.round(this.frequencia * 100)
+            + (this.obstaculosAtivos ? 0 : 1e9);
         const rowMin = this.rowMin, rowMax = this.rowMax;
 
         // ---- 3) alturas (uma passada) + geração dos tiles ----
@@ -234,7 +269,7 @@ class TerrenoIsometrico {
                     const dy = (j - camY) * s;
                     const sx = cx + dx * cosA - dy * sinA;
                     const syB = c2base + (dx * sinA + dy * cosA) * sinP;
-                    if (sx > -s && sx < W + s && syB > -s && syB < H + s) {
+                    if (sx > vx0 - s && sx < vx1 + s && syB > vy0 - s && syB < vy1 + s) {
                         const atraso = this.ondaInicial ? Math.hypot(i - camX, j - camY) * 2 : 0;
                         info = { nasc: quadro + atraso, visto: quadro };
                         tiles.set(k, info);
@@ -244,8 +279,17 @@ class TerrenoIsometrico {
                 if (info) {
                     info.visto = quadro;
                     const bruta = this.alturaBruta(i, j);
-                    alt[base + j] = bruta * this.crescimento(info) * esc;
+                    const e = this.crescimento(info);
+                    alt[base + j] = bruta * e * esc;
                     cores[base + j] = Math.min(255, (bruta * invPal) | 0);
+
+                    if (info.sig !== sig) {
+                        info.sig = sig;
+                        info.obst = this.obstaculosAtivos
+                            ? this.decidirObstaculo(i, j, bruta * invPal / 255, tipoInfo.paleta)
+                            : null;
+                    }
+                    if (info.obst) { obsBuf[base + j] = info.obst; escBuf[base + j] = e; }
                 } else {
                     alt[base + j] = 0; // ainda não nasceu: chão plano
                     cores[base + j] = 0;
@@ -333,15 +377,27 @@ class TerrenoIsometrico {
                 ctx.lineTo(sx + ox[3], syTopo + oy[3]);
                 ctx.fill();
 
+                // obstáculo (árvore, pedra...): logo depois do tile, antes dos mais próximos
+                const ob = obsBuf[idx];
+                if (ob && escBuf[idx] > 0.04) {
+                    const ox = ob.ox * s, oy = ob.oy * s;
+                    this.obstaculos.desenhar(
+                        ctx, ob,
+                        sx + ox * cosA - oy * sinA,
+                        syTopo + (ox * sinA + oy * cosA) * sinP,
+                        escBuf[idx]
+                    );
+                }
+
                 // personagem: logo depois do próprio tile
                 if (p && i === ti && j === tj) {
                     const pdx = (p.gx - camX) * s, pdy = (p.gy - camY) * s;
                     p.desenharEm(
                         cx + pdx * cosA - pdy * sinA,
                         cy + (pdx * sinA + pdy * cosA) * sinP - (p.z - camZ) * cosP,
-                        sinP
+                        sinP, cosP
                     );
-                    corAtual = null; // o sprite mexe no estado do contexto
+                    corAtual = null; // o personagem mexe no estado do contexto
                 }
             }
         }
@@ -353,10 +409,23 @@ class TerrenoIsometrico {
             }
         }
 
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+
         this.quadro++;
         this.tempo += this.velocidade;
     }
 
+    // Sorteia o obstáculo do tile, evitando a área do personagem e do ponto inicial
+    decidirObstaculo(i, j, f, paleta) {
+        if (Math.abs(i) <= 2 && Math.abs(j) <= 2) return null;
+        const p = this.personagem;
+        if (p && p.gx !== null &&
+            Math.abs(i - Math.round(p.gx)) <= 1 && Math.abs(j - Math.round(p.gy)) <= 1) return null;
+        return this.obstaculos.gerar(this.algoritmo, i, j, paleta, f);
+    }
+
+    set setObstaculos(valor) { this.obstaculosAtivos = !!valor; }
+    set setZoom(valor) { this.zoomAlvo = valor; }
     set setAmplitude(valor) { this.amplitude = valor; }
     set setFrequencia(valor) { this.frequencia = valor; }
     set setAlgoritmoTerreno(valor) { this.algoritmoTerreno = valor; }

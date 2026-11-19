@@ -27,6 +27,11 @@ main {
     padding: 20px;
 }
 
+main > div:first-child {
+    position: relative;
+    display: inline-block;
+}
+
 /* Coluna direita (painel + joystick) */
 main > div:last-child {
     display: flex;
