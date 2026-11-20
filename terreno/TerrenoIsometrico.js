@@ -59,6 +59,55 @@ class TerrenoIsometrico {
         this.obstaculosAtivos = true;
         this.bufObs = [];                       // obstáculo de cada tile no frame (ou null)
         this.bufEsc = new Float32Array(0);      // quanto o tile já cresceu (0..1)
+
+        // Itens no chão e entidades (personagem, NPCs, flechas...)
+        this.jogo = null;
+        this.itensAtivos = true;                // liga/desliga os itens no chão
+        this.coletados = new Set();             // tiles de onde um item já foi pego
+        this.bufItem = [];
+        this.bufEnt = new Uint8Array(0);
+        this.entMap = new Map();
+    }
+
+    alturaRelativa(i, j) {
+        return this.amplitude > 0 ? this.alturaBruta(i, j) / (this.amplitude * 2) : 0;
+    }
+
+    itemEm(i, j) {
+        if (!this.itensAtivos) return null;
+        const info = this.tiles.get(this.chave(i, j));
+        return info ? info.item || null : null;
+    }
+
+    removerItem(i, j) {
+        const k = this.chave(i, j);
+        const info = this.tiles.get(k);
+        if (info) info.item = null;
+        this.coletados.add(k);   // não volta a nascer quando o tile for recriado
+    }
+
+    colocarItem(i, j, tipo) {
+        if (!this.itensAtivos) return false;
+        const info = this.tiles.get(this.chave(i, j));
+        if (!info || info.item || info.obst) return false;
+        info.item = tipo;
+        return true;
+    }
+
+    // Sorteio de item ao nascer o tile (~0,8% dos tiles): 35% armas, 65% comidas
+    decidirItem(i, j, f) {
+        if (this.coletados.has(this.chave(i, j))) return null;
+        if (Itens.iniciais[i + "," + j]) return Itens.iniciais[i + "," + j];
+        if (f < 0.012) return null;
+        const alg = this.algoritmo;
+        if (alg.hash2(i, j, 31) > 0.008) return null;
+        const h = alg.hash2(i, j, 32);
+        if (h < 0.15) return "espada";
+        if (h < 0.25) return "machado";
+        if (h < 0.35) return "arco";
+        if (h < 0.60) return "maca";
+        if (h < 0.80) return "pao";
+        return "carne";
     }
 
     // O tile (i, j) tem um obstáculo que bloqueia a passagem?
@@ -189,6 +238,11 @@ class TerrenoIsometrico {
                 this.camZ += (p.z - this.camZ) * 0.10;
             }
         }
+        if (this.jogo) {                    // NPCs, combate e itens (só com o personagem ligado)
+            this.jogo.ativo = !!p;
+            if (p) this.jogo.atualizar(this);
+            else this.jogo.limpar();
+        }
         const camX = this.camX, camY = this.camY, camZ = this.camZ;
 
         // ---- 2) caixa de tiles que cobre a tela ----
@@ -218,6 +272,8 @@ class TerrenoIsometrico {
             this.bufCor = new Uint8Array(this.bufAlt.length);
             this.bufEsc = new Float32Array(this.bufAlt.length);
             this.bufObs = new Array(this.bufAlt.length).fill(null);
+            this.bufItem = new Array(this.bufAlt.length).fill(null);
+            this.bufEnt = new Uint8Array(this.bufAlt.length);
         }
         if (this.rowMin.length < nLin) {
             this.rowMin = new Int32Array(nLin * 2);
@@ -228,6 +284,9 @@ class TerrenoIsometrico {
         const obsBuf = this.bufObs, escBuf = this.bufEsc;
         alt.fill(NaN, 0, tam);
         obsBuf.fill(null, 0, tam);
+        const itemBuf = this.bufItem, entBuf = this.bufEnt;
+        itemBuf.fill(null, 0, tam);
+        entBuf.fill(0, 0, tam);
 
         // paleta do terreno atual
         const tipoInfo = Algoritmo.tipos[this.algoritmoTerreno] || Algoritmo.tipos[0];
@@ -290,6 +349,11 @@ class TerrenoIsometrico {
                             : null;
                     }
                     if (info.obst) { obsBuf[base + j] = info.obst; escBuf[base + j] = e; }
+
+                    if (info.item === undefined) {   // itens: sorteados uma vez, quando o tile nasce
+                        info.item = info.obst ? null : this.decidirItem(i, j, bruta * invPal / 255);
+                    }
+                    if (info.item && this.itensAtivos) { itemBuf[base + j] = info.item; escBuf[base + j] = e; }
                 } else {
                     alt[base + j] = 0; // ainda não nasceu: chão plano
                     cores[base + j] = 0;
@@ -297,6 +361,21 @@ class TerrenoIsometrico {
             }
         }
         this.ondaInicial = false;
+
+        // ---- entidades agrupadas por tile (desenhadas na ordem de profundidade) ----
+        const entMap = this.entMap;
+        entMap.clear();
+        const ents = this.jogo ? this.jogo.entidades() : (p ? [p] : []);
+        for (const e of ents) {
+            const ei = Math.round(e.gx), ej = Math.round(e.gy);
+            if (ei < i0 || ei > i1) continue;
+            const er = ei - i0;
+            if (ej < rowMin[er] || ej > rowMax[er]) continue;
+            const eidx = (ei - i0 + 1) * nJ + (ej - j0 + 1);
+            entBuf[eidx] = 1;
+            const lista = entMap.get(eidx);
+            if (lista) lista.push(e); else entMap.set(eidx, [e]);
+        }
 
         // ---- 4) valores constantes do frame, iguais para todos os tiles ----
         // deslocamento na tela de cada canto do tile (ligeiramente maior p/ cobrir frestas)
@@ -321,8 +400,6 @@ class TerrenoIsometrico {
         }
         const viz = [-1, nJ, 1, -nJ];   // deslocamento no buffer até o vizinho de cada face
 
-        const ti = p ? Math.round(p.gx) : 0;
-        const tj = p ? Math.round(p.gy) : 0;
         let corAtual = null;
 
         // ---- 5) desenho de trás para frente, SEM ordenar ----
@@ -389,15 +466,30 @@ class TerrenoIsometrico {
                     );
                 }
 
-                // personagem: logo depois do próprio tile
-                if (p && i === ti && j === tj) {
-                    const pdx = (p.gx - camX) * s, pdy = (p.gy - camY) * s;
-                    p.desenharEm(
-                        cx + pdx * cosA - pdy * sinA,
-                        cy + (pdx * sinA + pdy * cosA) * sinP - (p.z - camZ) * cosP,
-                        sinP, cosP
-                    );
-                    corAtual = null; // o personagem mexe no estado do contexto
+                // item no chão
+                const item = itemBuf[idx];
+                if (item && escBuf[idx] > 0.2) {
+                    const perto = this.jogo && this.jogo.itemPerto &&
+                        this.jogo.itemPerto.i === i && this.jogo.itemPerto.j === j;
+                    Itens.desenharChao(ctx, item, sx, syTopo, this.quadro, perto);
+                    corAtual = null; // o item troca o fillStyle (brilho e sombra): força reaplicar a cor do tile
+                }
+
+                // entidades neste tile (personagem, NPCs, flechas...): logo depois dele
+                if (entBuf[idx]) {
+                    const lista = entMap.get(idx);
+                    if (lista.length > 1) {
+                        lista.sort((a, b) => (a.gx * sinA + a.gy * cosA) - (b.gx * sinA + b.gy * cosA));
+                    }
+                    for (const e of lista) {
+                        const edx = (e.gx - camX) * s, edy = (e.gy - camY) * s;
+                        e.desenharEm(
+                            cx + edx * cosA - edy * sinA,
+                            cy + (edx * sinA + edy * cosA) * sinP - (e.z - camZ) * cosP,
+                            sinP, cosP, cosA, sinA
+                        );
+                    }
+                    corAtual = null; // as entidades mexem no estado do contexto
                 }
             }
         }
@@ -417,13 +509,14 @@ class TerrenoIsometrico {
 
     // Sorteia o obstáculo do tile, evitando a área do personagem e do ponto inicial
     decidirObstaculo(i, j, f, paleta) {
-        if (Math.abs(i) <= 2 && Math.abs(j) <= 2) return null;
+        if (Math.abs(i) <= 4 && Math.abs(j) <= 4) return null;   // área inicial livre (itens iniciais)
         const p = this.personagem;
         if (p && p.gx !== null &&
             Math.abs(i - Math.round(p.gx)) <= 1 && Math.abs(j - Math.round(p.gy)) <= 1) return null;
         return this.obstaculos.gerar(this.algoritmo, i, j, paleta, f);
     }
 
+    set setItens(valor) { this.itensAtivos = !!valor; }
     set setObstaculos(valor) { this.obstaculosAtivos = !!valor; }
     set setZoom(valor) { this.zoomAlvo = valor; }
     set setAmplitude(valor) { this.amplitude = valor; }

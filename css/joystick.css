@@ -1,15 +1,15 @@
 .directional-pad {
-    --size: 130px; /* Tamanho levemente menor para não ocupar muito espaço da tela */
+    --size: 130px;
     --cor-borda: rgba(148, 163, 184, 0.35);
     --cor-linha: rgba(56, 189, 248, 0.35);
     --cor-knob: #f8fafc;
     --x-value: 0;
     --y-value: 0;
 
-    /* Posicionamento no canto inferior direito do canvas */
+    /* Posicionado acima do controle de zoom no canto inferior direito */
     position: absolute;
-    right: 20px;
-    bottom: 20px;
+    right: 28px;
+    bottom: 78px;
     z-index: 10;
 
     width: var(--size);
@@ -20,7 +20,7 @@
     touch-action: none;
     cursor: grab;
     border-radius: 50%;
-    opacity: 0.72; /* Discreto quando parado para ver o terreno através dele */
+    opacity: 0.72;
     transition: opacity 0.25s ease, transform 0.2s ease;
 }
 

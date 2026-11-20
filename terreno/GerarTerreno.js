@@ -1,5 +1,5 @@
 class GerarTerreno {
-    constructor(caneta, joystick = null, personagem = null) {
+    constructor(caneta, joystick = null, personagem = null, jogo = null) {
         this.caneta = caneta;
         this.joystick = joystick;
 
@@ -14,12 +14,18 @@ class GerarTerreno {
         this.elFrequencia = document.getElementById("frequencia");
         this.elZoom = document.getElementById("zoom");
         this.elObstaculos = document.getElementById("obstaculosAtivos");
+        this.elNpcs = document.getElementById("npcsAtivos");
+        this.elItens = document.getElementById("itensAtivos");
+        this.jogo = jogo;
 
         this.terrenos = [
             new TerrenoIsometrico(this.caneta),
         ];
 
-        for (const terreno of this.terrenos) terreno.personagem = personagem;
+        for (const terreno of this.terrenos) {
+            terreno.personagem = personagem;
+            terreno.jogo = jogo;
+        }
     }
 
     desenhar() {
@@ -32,6 +38,8 @@ class GerarTerreno {
 
         if (this.elZoom) terrenoAtual.setZoom = parseFloat(this.elZoom.value);
         if (this.elObstaculos) terrenoAtual.setObstaculos = this.elObstaculos.checked;
+        if (this.elItens) terrenoAtual.setItens = this.elItens.checked;
+        if (this.jogo && this.elNpcs) this.jogo.npcsAtivos = this.elNpcs.checked;
 
         if (this.joystick) {
             const x = Math.abs(this.joystick.x) > this.zonaMorta ? this.joystick.x : 0;

@@ -1,5 +1,23 @@
 @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');
 
+:root {
+    --bg-dark: #0f172a;
+    --bg-surface: rgba(30, 41, 59, 0.65);
+    --bg-hud: rgba(15, 23, 42, 0.82);
+    --track-bg: #334155;
+    --accent: #38bdf8;
+    --accent-dark: #3b82f6;
+    --text-primary: #f1f5f9;
+    --text-secondary: #cbd5e1;
+    --border-subtle: rgba(255, 255, 255, 0.12);
+    --border-accent: rgba(56, 189, 248, 0.35);
+    --radius-lg: 16px;
+    --radius-md: 12px;
+}
+
+/* ==========================================================================
+   1. RESET & LAYOUT PRINCIPAL
+   ========================================================================== */
 * {
     box-sizing: border-box;
     margin: 0;
@@ -13,26 +31,26 @@ body {
     min-height: 100vh;
     overflow: hidden;
     font-family: 'Poppins', sans-serif;
-    color: #f1f5f9;
-    background: radial-gradient(circle at center, #1e293b 0%, #0f172a 100%);
+    color: var(--text-primary);
+    background: radial-gradient(circle at center, #1e293b 0%, var(--bg-dark) 100%);
 }
 
 main {
     display: flex;
-    flex-wrap: nowrap;
-    flex-direction: row;
+    flex-flow: row nowrap;
     justify-content: center;
     align-items: center;
     gap: 28px;
     padding: 20px;
 }
 
+/* Coluna Esquerda (Canvas + HUD) */
 main > div:first-child {
     position: relative;
     display: inline-block;
 }
 
-/* Coluna direita (painel + joystick) */
+/* Coluna Direita (Painel de Configurações) */
 main > div:last-child {
     display: flex;
     flex-direction: column;
@@ -41,12 +59,14 @@ main > div:last-child {
     width: 280px;
 }
 
-/* Tela principal (Canvas) */
+/* ==========================================================================
+   2. CANVAS PRINCIPAL
+   ========================================================================== */
 #tela {
     display: block;
     background-color: rgba(15, 23, 42, 0.85);
-    border-radius: 16px;
-    border: 2px solid rgba(56, 189, 248, 0.35);
+    border-radius: var(--radius-lg);
+    border: 2px solid var(--border-accent);
     box-shadow: 
         0 0 28px rgba(56, 189, 248, 0.14),
         0 20px 45px rgba(0, 0, 0, 0.65);
@@ -59,35 +79,79 @@ main > div:last-child {
         0 20px 45px rgba(0, 0, 0, 0.65);
 }
 
-/* Painel Configurar */
+/* ==========================================================================
+   3. COMPONENTES COMPARTILHADOS (SLIDERS & OUTPUTS)
+   ========================================================================== */
+input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    background: var(--track-bg);
+    border-radius: 999px;
+    outline: none;
+    cursor: pointer;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 2px solid #f8fafc;
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.65);
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+    transform: scale(1.18);
+    box-shadow: 0 0 14px rgba(56, 189, 248, 0.95);
+}
+
+input[type="range"]::-moz-range-thumb {
+    border-radius: 50%;
+    background: var(--accent);
+    border: 2px solid #f8fafc;
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.65);
+    cursor: pointer;
+}
+
+output {
+    font-weight: 600;
+    color: var(--accent);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+/* ==========================================================================
+   4. PAINEL DE CONFIGURAÇÕES (FIELDSET)
+   ========================================================================== */
 fieldset {
     width: 100%;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 16px;
     padding: 20px 22px;
-    background: rgba(30, 41, 59, 0.65);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
     display: flex;
     flex-direction: column;
     gap: 16px;
+    background: var(--bg-surface);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
 }
 
 fieldset legend {
-    text-align: center;
     padding: 4px 16px;
+    text-align: center;
     font-weight: 700;
     font-size: 0.85rem;
     text-transform: uppercase;
     letter-spacing: 1.5px;
-    color: #38bdf8;
-    background: #0f172a;
-    border: 1px solid rgba(56, 189, 248, 0.35);
+    color: var(--accent);
+    background: var(--bg-dark);
+    border: 1px solid var(--border-accent);
     border-radius: 20px;
 }
 
-/* Cada bloco de controle dentro do fieldset */
 fieldset > div {
     display: flex;
     flex-wrap: wrap;
@@ -96,79 +160,46 @@ fieldset > div {
     gap: 6px 10px;
 }
 
-/* Rótulos dos sliders */
+fieldset > div br {
+    display: none;
+}
+
 fieldset label:not(.switch) {
     font-size: 0.88rem;
     font-weight: 500;
-    color: #cbd5e1;
+    color: var(--text-secondary);
 }
 
-/* Valores numéricos (Velocidade, Amplitude, Frequência) */
 fieldset output {
     font-size: 0.85rem;
-    font-weight: 600;
-    color: #38bdf8;
     min-width: 34px;
-    text-align: right;
-    font-variant-numeric: tabular-nums;
 }
 
-/* Faz o slider ocupar a linha inteira abaixo do label e output */
 fieldset input[type="range"] {
     order: 3;
     width: 100%;
     height: 6px;
-    -webkit-appearance: none;
-    appearance: none;
-    background: #334155;
-    border-radius: 999px;
-    outline: none;
-    cursor: pointer;
     margin-top: 2px;
 }
 
 fieldset input[type="range"]::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    appearance: none;
     width: 16px;
     height: 16px;
-    border-radius: 50%;
-    background: #38bdf8;
-    border: 2px solid #f8fafc;
-    box-shadow: 0 0 10px rgba(56, 189, 248, 0.65);
-    cursor: pointer;
-    transition: transform 0.15s ease, box-shadow 0.15s ease;
-}
-
-fieldset input[type="range"]::-webkit-slider-thumb:hover {
-    transform: scale(1.18);
-    box-shadow: 0 0 14px rgba(56, 189, 248, 0.95);
 }
 
 fieldset input[type="range"]::-moz-range-thumb {
     width: 16px;
     height: 16px;
-    border-radius: 50%;
-    background: #38bdf8;
-    border: 2px solid #f8fafc;
-    box-shadow: 0 0 10px rgba(56, 189, 248, 0.65);
-    cursor: pointer;
 }
 
-/* Esconde o <br> do bloco do Algoritmo para não quebrar o flex */
-fieldset > div br {
-    display: none;
-}
-
-/* Nome do Algoritmo centralizado embaixo do slider */
+/* Destaque do Algoritmo Selecionado */
 #valorAlgoritmo {
     order: 4;
     width: 100%;
-    text-align: center;
     margin-top: 4px;
     padding: 4px 10px;
+    text-align: center;
     font-size: 0.9rem;
-    font-weight: 600;
     color: #e0f2fe;
     background: rgba(56, 189, 248, 0.12);
     border: 1px solid rgba(56, 189, 248, 0.25);
@@ -176,18 +207,28 @@ fieldset > div br {
     letter-spacing: 0.3px;
 }
 
-/* Linha do switch Personagem */
-fieldset > div:last-child {
-    padding-top: 6px;
+/* ==========================================================================
+   5. SWITCHES
+   ========================================================================== */
+fieldset > div:has(.switch) {
+    width: 100%;
+    flex-wrap: nowrap;
+    padding-top: 8px;
     border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
+/* Remove borda duplicada caso haja múltiplos switches seguidos */
+fieldset > div:has(.switch) ~ div:has(.switch) {
+    padding-top: 0;
+    border-top: none;
+}
+
 .switch {
-    display: inline-flex;
+    display: flex;
     align-items: center;
     justify-content: space-between;
     width: 100%;
-    gap: 12px;
+    gap: 16px;
     cursor: pointer;
     user-select: none;
     font-size: 0.9rem;
@@ -204,10 +245,11 @@ fieldset > div:last-child {
 
 .switch .slider {
     position: relative;
+    flex-shrink: 0;
     width: 46px;
     height: 24px;
     border-radius: 24px;
-    background: #334155;
+    background: var(--track-bg);
     border: 1px solid rgba(255, 255, 255, 0.1);
     transition: background 0.25s ease, box-shadow 0.25s ease;
 }
@@ -220,13 +262,13 @@ fieldset > div:last-child {
     width: 16px;
     height: 16px;
     border-radius: 50%;
-    background: #cbd5e1;
+    background: var(--text-secondary);
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.35);
     transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), background 0.25s ease;
 }
 
 .switch input:checked + .slider {
-    background: linear-gradient(135deg, #38bdf8 0%, #3b82f6 100%);
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-dark) 100%);
     box-shadow: 0 0 12px rgba(56, 189, 248, 0.45);
 }
 
@@ -236,6 +278,73 @@ fieldset > div:last-child {
 }
 
 .switch input:focus-visible + .slider {
-    outline: 2px solid #38bdf8;
+    outline: 2px solid var(--accent);
     outline-offset: 2px;
+}
+
+/* ==========================================================================
+   6. HUD FLUTUANTE (ZOOM & AJUDA)
+   ========================================================================== */
+main > div:first-child > div:last-child {
+    position: absolute;
+    right: 20px;
+    bottom: 20px;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 146px;
+    padding: 8px 12px;
+    background: var(--bg-hud);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    border-radius: var(--radius-md);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.55);
+    opacity: 0.78;
+    transition: opacity 0.25s ease, border-color 0.25s ease;
+}
+
+main > div:first-child > div:last-child:hover,
+main > div:first-child > div:last-child:focus-within {
+    opacity: 1;
+    border-color: rgba(56, 189, 248, 0.55);
+}
+
+main > div:first-child > div:last-child label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    user-select: none;
+}
+
+main > div:first-child > div:last-child input[type="range"] {
+    flex: 1;
+    min-width: 0;
+    height: 4px;
+}
+
+main > div:first-child > div:last-child input[type="range"]::-webkit-slider-thumb {
+    width: 13px;
+    height: 13px;
+    border-width: 1.5px;
+}
+
+main > div:first-child > div:last-child input[type="range"]::-moz-range-thumb {
+    width: 13px;
+    height: 13px;
+    border-width: 1.5px;
+}
+
+main > div:first-child > div:last-child output {
+    font-size: 0.75rem;
+    min-width: 28px;
+}
+
+.ajuda { 
+    font-size: 0.75rem; 
+    opacity: 0.8; 
+    text-align: center; 
+    max-width: 260px; 
+    margin: 10px auto 0; 
 }
