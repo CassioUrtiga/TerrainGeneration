@@ -24,6 +24,18 @@ class Personagem {
         this.espacoAntes = false;
         this.achata = 0;          // >0 achatado (aterrissagem), <0 esticado (decolagem)
 
+        // Vida e combate
+        this.vidaMax = 10;
+        this.vida = 10;
+        this.morto = false;
+        this.invul = 0;           // frames de invulnerabilidade após levar dano
+        this.flashDano = 0;
+        this.kx = 0; this.ky = 0; // empurrão
+        this.dirGx = 0; this.dirGy = 1;   // para onde olha, no chão (alvo dos ataques)
+        this.golpeT = 0; this.golpeDur = 14;
+        this.armaTipo = null;     // arma na mão (definida pelo Jogo)
+        this.armaTiro = false;
+
         // Animação
         this.estado = -1;         // 1 costas | -1 frente | 2 direita | -2 esquerda
         this.movendo = false;
@@ -77,7 +89,11 @@ class Personagem {
         if (this.gx === null) this.posicionarInicio(terreno);
         this.tempoAnim++;
 
-        const t = this.teclado;
+        const t = this.morto ? {} : this.teclado;
+        if (this.invul > 0) this.invul--;
+        if (this.flashDano > 0) this.flashDano--;
+        if (this.golpeT > 0) this.golpeT--;
+
         const ex = (t.direita ? 1 : 0) - (t.esquerda ? 1 : 0); // direção na TELA
         const ey = (t.baixo ? 1 : 0) - (t.cima ? 1 : 0);
         this.movendo = ex !== 0 || ey !== 0;
@@ -98,6 +114,20 @@ class Personagem {
             if (this.livre(terreno, this.gx, this.gy + dy)) this.gy += dy;
         }
         if (this.movendo && this.noChao) this.fase += 0.3;
+
+        // direção do olhar no chão (os ataques vão para lá)
+        const vxs = this.estado === 2 ? 1 : this.estado === -2 ? -1 : 0;
+        const vys = this.estado === -1 ? 1 : this.estado === 1 ? -1 : 0;
+        const cyw = Math.cos(yaw), syw = Math.sin(yaw);
+        this.dirGx = vxs * cyw + vys * syw;
+        this.dirGy = -vxs * syw + vys * cyw;
+
+        // empurrão ao levar dano
+        if (Math.abs(this.kx) + Math.abs(this.ky) > 0.003) {
+            if (this.livre(terreno, this.gx + this.kx, this.gy)) this.gx += this.kx;
+            if (this.livre(terreno, this.gx, this.gy + this.ky)) this.gy += this.ky;
+            this.kx *= 0.82; this.ky *= 0.82;
+        }
 
         // ---- pulo ----
         if (t.space && !this.espacoAntes) this.bufferPulo = 6;
@@ -140,6 +170,29 @@ class Personagem {
     // ================== desenho ==================
 
     // (sx, sy) = pés do personagem na tela; sinP/cosP = inclinação da câmera
+    iniciarGolpe(duracao) {
+        this.golpeDur = duracao;
+        this.golpeT = duracao;
+    }
+
+    // (nx, ny) = direção do golpe, de quem atacou para o personagem
+    receberDano(dano, nx, ny) {
+        if (this.morto || this.invul > 0) return false;
+        this.vida = Math.max(0, this.vida - dano);
+        this.invul = 70;
+        this.flashDano = 12;
+        this.kx = nx * 0.16; this.ky = ny * 0.16;
+        if (this.vida <= 0) this.morto = true;
+        return true;
+    }
+
+    reviver() {
+        this.vida = this.vidaMax;
+        this.morto = false;
+        this.invul = 120;
+        this.kx = this.ky = 0;
+    }
+
     desenharEm(sx, sy, sinP, cosP) {
         const g = this.caneta;
         const alto = Math.max(0, this.z - this.chaoZ);       // altura acima do chão
@@ -159,8 +212,14 @@ class Personagem {
         const c = andando ? Math.cos(this.fase) : 0;
         const bob = andando ? Math.abs(c) * 1.3 : 0.35 + Math.sin(this.tempoAnim * 0.07) * 0.35;
 
+        const corOrig = this.cores.camisa;
+        if (this.flashDano > 0) this.cores.camisa = "#e5493d";   // fica vermelho ao levar dano
+
         g.save();
         g.translate(sx, sy);
+        if (this.invul > 0 && !this.morto && Math.floor(this.invul / 4) % 2 === 0) g.globalAlpha = 0.5;
+        if (this.golpeT > 0 && this.armaTipo && !this.armaTiro) this.arcoGolpe(g);   // corte da arma
+        if (this.morto) { g.rotate(this.estado === -2 ? -1.45 : 1.45); g.globalAlpha = 0.8; }
         g.scale(this.escala * (1 + this.achata * 0.14), this.escala * (1 - this.achata * 0.18));
         if (this.estado === -2) g.scale(-1, 1);              // esquerda = direita espelhada
 
@@ -168,6 +227,33 @@ class Personagem {
         else if (this.estado === 1) this.vistaFrente(g, s, bob, ar, true);
         else this.vistaLado(g, s, c, bob, ar);
         g.restore();
+        this.cores.camisa = corOrig;
+    }
+
+    // arco branco que acompanha o golpe de espada/machado
+    arcoGolpe(g) {
+        const u = 1 - this.golpeT / this.golpeDur;
+        const ang = this.estado === 2 ? 0 : this.estado === -2 ? Math.PI : this.estado === 1 ? -Math.PI / 2 : Math.PI / 2;
+        g.save();
+        g.lineCap = "round";
+        for (const [w, a] of [[5, 0.25], [2.4, 0.85]]) {
+            g.strokeStyle = `rgba(255,255,255,${a * (1 - u * 0.7)})`;
+            g.lineWidth = w;
+            g.beginPath();
+            g.arc(0, -11, 17, ang - 1.1, ang - 1.1 + 2.2 * Math.min(1, u * 1.6));
+            g.stroke();
+        }
+        g.restore();
+    }
+
+    // arma na mão (hx, hy): balança no golpe
+    maoArma(g, hx, hy) {
+        let ang = this.armaTiro ? 0.15 : 0.5;
+        if (this.golpeT > 0) {
+            const u = 1 - this.golpeT / this.golpeDur;
+            ang = this.armaTiro ? 0.15 - Math.sin(u * Math.PI) * 0.25 : -1.3 + u * 2.9;
+        }
+        Itens.desenharMao(g, this.armaTipo, hx, hy, ang, 0.85);
     }
 
     // ---------- formas básicas (com contorno) ----------
@@ -227,6 +313,7 @@ class Personagem {
         this.capsula(g, 5.4, -17.6, bx, yD, 3.1, C.camisa);
         this.circ(g, -bx, yE, 1.8, C.pele);
         this.circ(g, bx, yD, 1.8, C.pele);
+        if (this.armaTipo) this.maoArma(g, bx, yD);
 
         // cabeça
         if (costas) {
@@ -303,6 +390,7 @@ class Personagem {
         const hA = ar ? [5.6, -24.2] : [-s * 3.6, -10.8];
         this.capsula(g, 0.4, -17.6, hA[0], hA[1], 3, C.camisa);
         this.circ(g, hA[0], hA[1], 1.8, C.pele);
+        if (this.armaTipo) this.maoArma(g, hA[0], hA[1]);
         g.restore();
     }
 }
