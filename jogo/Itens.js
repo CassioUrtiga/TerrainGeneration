@@ -53,15 +53,19 @@ class Itens {
         g.restore();
     }
 
-    // item aleatório para recompensas: 35% armas, 65% comidas
-    static sorteio() {
-        const h = Math.random();
+    // h (0..1) -> tipo de item: 35% armas, 65% comidas
+    static sortear(h) {
         if (h < 0.15) return "espada";
         if (h < 0.25) return "machado";
         if (h < 0.35) return "arco";
         if (h < 0.60) return "maca";
         if (h < 0.80) return "pao";
         return "carne";
+    }
+
+    // item aleatório para recompensas (drops de NPCs)
+    static sorteio() {
+        return Itens.sortear(Math.random());
     }
 }
 

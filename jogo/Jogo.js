@@ -1,3 +1,4 @@
+// Flecha disparada pelo arco
 class Flecha {
     constructor(ctx, gx, gy, z, dx, dy, dano) {
         this.g = ctx;
@@ -86,6 +87,26 @@ class Particula {
     }
 }
 
+// Anel no chão que mostra para onde o personagem está indo (clique do mouse)
+class Marcador {
+    constructor(ctx) {
+        this.g = ctx;
+        this.gx = 0; this.gy = 0; this.z = 0;
+        this.t = 0;
+    }
+
+    desenharEm(sx, sy, sinP) {
+        const g = this.g;
+        const k = 1 + 0.12 * Math.sin(++this.t * 0.2);
+        g.save();
+        g.strokeStyle = "rgba(255,255,255,0.9)"; g.lineWidth = 1.8;
+        g.beginPath(); g.ellipse(sx, sy, 9 * k, Math.max(2, 9 * sinP) * k, 0, 0, Math.PI * 2); g.stroke();
+        g.strokeStyle = "rgba(255,225,120,0.95)"; g.lineWidth = 1.1;
+        g.beginPath(); g.ellipse(sx, sy, 4.5, Math.max(1, 4.5 * sinP), 0, 0, Math.PI * 2); g.stroke();
+        g.restore();
+    }
+}
+
 // Controla o jogo: itens no chão, hotbar, combate, NPCs, flechas e partículas.
 class Jogo {
     constructor(ctx, canvas, teclado, personagem) {
@@ -105,6 +126,8 @@ class Jogo {
         this.projeteis = [];
         this.particulas = [];
         this.itemPerto = null;
+        this.marcador = new Marcador(ctx);
+        this.marcadorVisivel = false;
 
         this.abates = 0;
         this.tempoSpawn = 150;
@@ -141,6 +164,14 @@ class Jogo {
 
         this.itemPerto = p.morto ? null : this.procurarItem(terreno);
 
+        // marcador do destino do mouse
+        this.marcadorVisivel = !!p.destino && !p.morto;
+        if (this.marcadorVisivel) {
+            this.marcador.gx = p.destino.gx;
+            this.marcador.gy = p.destino.gy;
+            this.marcador.z = terreno.alturaTile(Math.round(p.destino.gx), Math.round(p.destino.gy));
+        }
+
         this.atualizarNpcs(terreno);
 
         for (const f of this.projeteis) f.atualizar(this, terreno);
@@ -160,7 +191,9 @@ class Jogo {
     // tudo que é desenhado junto com os tiles (na ordem de profundidade)
     entidades() {
         if (!this.ativo) return [];
-        return [this.p, ...this.npcs, ...this.projeteis, ...this.particulas];
+        const lista = [this.p, ...this.npcs, ...this.projeteis, ...this.particulas];
+        if (this.marcadorVisivel) lista.push(this.marcador);
+        return lista;
     }
 
     // ---------- entrada ----------

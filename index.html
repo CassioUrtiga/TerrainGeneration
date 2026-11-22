@@ -24,9 +24,9 @@
 
             <div>
                 <label for="zoom">Zoom</label>
-                <input type="range" id="zoom" min="0.7" max="3" step="0.05" value="1"
+                <input type="range" id="zoom" min="1.5" max="3" step="0.5" value="1.5"
                     oninput="valorZoom.textContent = this.value + '×'" />
-                <output id="valorZoom">1×</output>
+                <output id="valorZoom">1.5×</output>
             </div>
         </div>
         <div>
@@ -49,14 +49,14 @@
 
                 <div>
                     <label for="amplitude">Amplitude</label>
-                    <input type="range" id="amplitude" min="0" max="200" value="1"
+                    <input type="range" id="amplitude" min="1" max="200" value="1"
                         oninput="valorAmplitude.textContent = this.value" />
                     <output id="valorAmplitude">1</output>
                 </div>
 
                 <div>
                     <label for="frequencia">Frequência</label>
-                    <input type="range" id="frequencia" min="0" max="6" step="0.1" value="0.1"
+                    <input type="range" id="frequencia" min="0.1" max="3" step="0.1" value="0.1"
                         oninput="valorFrequencia.textContent = this.value" />
                     <output id="valorFrequencia">0.1</output>
                 </div>
@@ -95,8 +95,7 @@
             </fieldset>
 
             <p class="ajuda">
-                Setas/WASD andam · Espaço pula · 1-3 escolhem o slot ·
-                F ataca ou come · E pega · Q solta · R revive · clique no jogo também ataca
+                Setas/WASD andam · clique esquerdo anda até o ponto (segure para seguir o mouse) · Espaço pula · 1-3 escolhem o slot · F ou botão direito ataca/come · E pega · Q solta · R revive
             </p>
         </div>
     </main>
