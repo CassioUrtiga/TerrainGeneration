@@ -15,11 +15,12 @@ class Personagem {
         this.raio = 0.22;         // "pegada" do personagem, em tiles
         this.passoMax = 14;       // maior degrau que ele sobe andando (pulando sobe mais)
 
-        // Pulo
+        // Pulo e Nado
         this.gravidade = 0.35;    // queda por frame
-        this.forcaPulo = 5.2;     // impulso inicial (altura do pulo ≈ forca² / (2 × gravidade))
+        this.forcaPulo = 5.2;     // impulso inicial
         this.vz = 0;
         this.noChao = true;
+        this.naAgua = false;      // true quando está nadando na água
         this.bufferPulo = 0;      // aceita o "pular" apertado um pouco antes de aterrissar
         this.espacoAntes = false;
         this.achata = 0;          // >0 achatado (aterrissagem), <0 esticado (decolagem)
@@ -36,10 +37,14 @@ class Personagem {
         this.armaTipo = null;     // arma na mão (definida pelo Jogo)
         this.armaTiro = false;
 
+        // Destino do mouse: { gx, gy } ou null
+        this.destino = null;
+        this.semProgresso = 0;
+
         // Animação
         this.estado = -1;         // 1 costas | -1 frente | 2 direita | -2 esquerda
         this.movendo = false;
-        this.fase = 0;            // fase do ciclo de caminhada
+        this.fase = 0;            // fase do ciclo de caminhada/nado
         this.tempoAnim = 0;
 
         this.cores = {
@@ -84,7 +89,15 @@ class Personagem {
         return Math.max(...tiles.map(([i, j]) => terreno.alturaTile(i, j)));
     }
 
-    // Movimento, colisão e pulo. Chamado pelo terreno a cada frame, com a câmera atual (yaw).
+    // Verifica se o bioma atual tem água no nível 0 (exclui vulcões e dunas)
+    biomaTemAgua(terreno) {
+        if (typeof Algoritmo === "undefined" || !Algoritmo.tipos) return true;
+        const tipoInfo = Algoritmo.tipos[terreno.algoritmoTerreno];
+        if (!tipoInfo) return true;
+        return tipoInfo.paleta !== "vulcao" && tipoInfo.paleta !== "dunas";
+    }
+
+    // Movimento, colisão, nado e pulo. Chamado pelo terreno a cada frame, com a câmera atual (yaw).
     atualizar(terreno, yaw) {
         if (this.gx === null) this.posicionarInicio(terreno);
         this.tempoAnim++;
@@ -94,26 +107,68 @@ class Personagem {
         if (this.flashDano > 0) this.flashDano--;
         if (this.golpeT > 0) this.golpeT--;
 
+        const chao = this.alturaChao(terreno, this.gx, this.gy);
+        this.chaoZ = chao;
+
+        // Está na água se o chão estiver no nível 0, encostado na superfície e o bioma tiver água
+        this.naAgua = this.noChao && chao <= 0.1 && this.biomaTemAgua(terreno);
+
+        // Nadar é ligeiramente mais lento que correr em terra firme
+        const velAtual = this.naAgua ? this.velocidade * 0.72 : this.velocidade;
+
         const ex = (t.direita ? 1 : 0) - (t.esquerda ? 1 : 0); // direção na TELA
         const ey = (t.baixo ? 1 : 0) - (t.cima ? 1 : 0);
-        this.movendo = ex !== 0 || ey !== 0;
+        const c = Math.cos(yaw), s = Math.sin(yaw);
+        let dx = 0, dy = 0;     // passo no chão neste frame
 
-        if (this.movendo) {
+        if (ex !== 0 || ey !== 0) {
+            this.destino = null;                      // o teclado cancela o destino do mouse
             if (ex !== 0) this.estado = ex > 0 ? 2 : -2;
             else this.estado = ey > 0 ? -1 : 1;
 
             // direção da tela -> direção no chão (compensa a rotação da câmera)
             const len = Math.hypot(ex, ey);
             const vx = ex / len, vy = ey / len;
-            const c = Math.cos(yaw), s = Math.sin(yaw);
-            const dx = (vx * c + vy * s) * this.velocidade;
-            const dy = (-vx * s + vy * c) * this.velocidade;
+            dx = (vx * c + vy * s) * velAtual;
+            dy = (-vx * s + vy * c) * velAtual;
+        } else if (this.destino && !this.morto) {
+            // mouse: caminha/nada em linha reta até o ponto clicado
+            const ddx = this.destino.gx - this.gx, ddy = this.destino.gy - this.gy;
+            const dist = Math.hypot(ddx, ddy);
+            if (dist < 0.1) {
+                this.destino = null;                  // chegou
+            } else {
+                const passo = Math.min(velAtual, dist);
+                dx = ddx / dist * passo;
+                dy = ddy / dist * passo;
+                const sxs = ddx * c - ddy * s, sys = ddx * s + ddy * c;   // direção na tela
+                this.estado = Math.abs(sxs) >= Math.abs(sys) ? (sxs > 0 ? 2 : -2) : (sys > 0 ? -1 : 1);
+            }
+        } else {
+            this.destino = null;
+        }
+        this.movendo = dx !== 0 || dy !== 0;
 
+        if (this.movendo) {
+            const x0 = this.gx, y0 = this.gy;
             // eixos separados: permite deslizar ao longo de paredes
             if (this.livre(terreno, this.gx + dx, this.gy)) this.gx += dx;
             if (this.livre(terreno, this.gx, this.gy + dy)) this.gy += dy;
+
+            // preso (obstáculo, parede, degrau alto demais): desiste do destino
+            if (this.destino) {
+                const andou = Math.hypot(this.gx - x0, this.gy - y0);
+                this.semProgresso = andou < 0.3 * Math.hypot(dx, dy) ? this.semProgresso + 1 : 0;
+                if (this.semProgresso > 25) { this.destino = null; this.semProgresso = 0; }
+            } else this.semProgresso = 0;
         }
-        if (this.movendo && this.noChao) this.fase += 0.3;
+
+        if (this.naAgua) {
+            // Ciclo contínuo de braçadas (mais rápido quando está nadando ativamente)
+            this.fase += this.movendo ? 0.22 : 0.08;
+        } else if (this.movendo && this.noChao) {
+            this.fase += 0.3;
+        }
 
         // direção do olhar no chão (os ataques vão para lá)
         const vxs = this.estado === 2 ? 1 : this.estado === -2 ? -1 : 0;
@@ -134,13 +189,12 @@ class Personagem {
         this.espacoAntes = t.space;
         if (this.bufferPulo > 0) this.bufferPulo--;
 
-        const chao = this.alturaChao(terreno, this.gx, this.gy);
-        this.chaoZ = chao;
-
         if (this.noChao) {
             if (this.bufferPulo > 0) {
-                this.vz = this.forcaPulo;
+                // Impulso para sair da água ou pular no chão
+                this.vz = this.naAgua ? this.forcaPulo * 0.88 : this.forcaPulo;
                 this.noChao = false;
+                this.naAgua = false;
                 this.bufferPulo = 0;
                 this.achata = -1;                       // estica ao decolar
             } else if (this.z - chao > 4) {
@@ -156,7 +210,7 @@ class Personagem {
             this.vz = Math.max(-12, this.vz - this.gravidade);
             this.z += this.vz;
             if (this.z < chao) {
-                this.z = chao;                          // aterrissou (ou o chão subiu sob ele)
+                this.z = chao;                          // aterrissou ou caiu na água
                 if (this.vz < 0) {
                     this.achata = Math.min(1, -this.vz / 6); // achata conforme a velocidade da queda
                     this.vz = 0;
@@ -169,13 +223,11 @@ class Personagem {
 
     // ================== desenho ==================
 
-    // (sx, sy) = pés do personagem na tela; sinP/cosP = inclinação da câmera
     iniciarGolpe(duracao) {
         this.golpeDur = duracao;
         this.golpeT = duracao;
     }
 
-    // (nx, ny) = direção do golpe, de quem atacou para o personagem
     receberDano(dano, nx, ny) {
         if (this.morto || this.invul > 0) return false;
         this.vida = Math.max(0, this.vida - dano);
@@ -195,6 +247,13 @@ class Personagem {
 
     desenharEm(sx, sy, sinP, cosP) {
         const g = this.caneta;
+
+        // Se estiver na água, renderiza a animação exclusiva de nado
+        if (this.naAgua) {
+            this.desenharNadando(g, sx, sy, sinP);
+            return;
+        }
+
         const alto = Math.max(0, this.z - this.chaoZ);       // altura acima do chão
         const k = 1 / (1 + alto * 0.03);                     // a sombra diminui com a altura
 
@@ -228,6 +287,195 @@ class Personagem {
         else this.vistaLado(g, s, c, bob, ar);
         g.restore();
         this.cores.camisa = corOrig;
+    }
+
+    // ================== animação de nadar ==================
+
+    desenharNadando(g, sx, sy, sinP) {
+        const esc = this.escala;
+        const t = this.tempoAnim;
+        const f = this.fase;
+        const s = Math.sin(f);
+        const c = Math.cos(f);
+        const flutua = Math.sin(t * 0.1) * 1.1; // oscilação vertical na superfície
+
+        // 1) Ondas concêntricas e espuma na superfície da água
+        g.save();
+        g.translate(sx, sy);
+        g.scale(esc, esc);
+
+        const cicloOnda = (t * 0.035) % 1;
+        const raioOnda = 7 + cicloOnda * (this.movendo ? 13 : 8);
+        g.strokeStyle = `rgba(255, 255, 255, ${(1 - cicloOnda) * 0.55})`;
+        g.lineWidth = 1.4;
+        g.beginPath();
+        g.ellipse(0, 0, raioOnda, Math.max(2.5, raioOnda * sinP), 0, 0, Math.PI * 2);
+        g.stroke();
+
+        // Segunda onda defasada e rastro de espuma quando está nadando
+        const ciclo2 = (cicloOnda + 0.5) % 1;
+        const raio2 = 6 + ciclo2 * (this.movendo ? 11 : 6);
+        g.strokeStyle = `rgba(210, 245, 255, ${(1 - ciclo2) * 0.45})`;
+        g.lineWidth = 1.1;
+        g.beginPath();
+        g.ellipse(0, 0, raio2, Math.max(2, raio2 * sinP), 0, 0, Math.PI * 2);
+        g.stroke();
+
+        if (this.movendo) {
+            // Rastro atrás do nadador
+            const rastroX = this.estado === 2 ? -10 : this.estado === -2 ? 10 : 0;
+            const rastroY = this.estado === -1 ? -6 : this.estado === 1 ? 6 : 0;
+            g.fillStyle = "rgba(255, 255, 255, 0.35)";
+            g.beginPath();
+            g.ellipse(rastroX, rastroY, 5 + Math.abs(s) * 2, Math.max(2, 4 * sinP), 0, 0, Math.PI * 2);
+            g.fill();
+        }
+        g.restore();
+
+        // 2) Corpo submerso (recorta tudo abaixo da linha d'água y = 1.5)
+        const corOrig = this.cores.camisa;
+        if (this.flashDano > 0) this.cores.camisa = "#e5493d";
+
+        g.save();
+        g.translate(sx, sy);
+        if (this.invul > 0 && !this.morto && Math.floor(this.invul / 4) % 2 === 0) g.globalAlpha = 0.5;
+        if (this.golpeT > 0 && this.armaTipo && !this.armaTiro) this.arcoGolpe(g);
+        g.scale(esc, esc);
+        if (this.estado === -2) g.scale(-1, 1);
+
+        // Clip da linha d'água: esconde pernas/quadril que ficam dentro da água
+        g.save();
+        g.beginPath();
+        g.rect(-36, -48, 72, 49.5);
+        g.clip();
+
+        if (this.morto) {
+            g.rotate(1.45);
+            g.globalAlpha = 0.8;
+            this.vistaLado(g, 0, 0, 0, 0);
+        } else if (this.estado === -1) {
+            this.nadarFrenteCostas(g, s, c, flutua, false);
+        } else if (this.estado === 1) {
+            this.nadarFrenteCostas(g, s, c, flutua, true);
+        } else {
+            this.nadarLado(g, s, c, flutua);
+        }
+        g.restore();
+
+        // Linha brilhante de espuma cortando o tronco na água
+        g.strokeStyle = "rgba(235, 250, 255, 0.85)";
+        g.lineWidth = 1.5;
+        g.beginPath();
+        g.moveTo(-8.5, 1.2);
+        g.quadraticCurveTo(0, 2.2, 8.5, 1.2);
+        g.stroke();
+
+        g.restore();
+        this.cores.camisa = corOrig;
+    }
+
+    // Nado de frente ou de costas: tronco parcialmente submerso e braçadas alternadas
+    nadarFrenteCostas(g, s, c, flutua, costas) {
+        const C = this.cores;
+        const submersoY = 10.5 - flutua; // desloca o corpo para baixo (cintura dentro d'água)
+
+        g.save();
+        g.translate(0, submersoY);
+        // Balanço lateral dos ombros durante as braçadas
+        g.rotate(this.movendo ? s * 0.09 : s * 0.02);
+
+        // Tronco (parte inferior será cortada pelo clip da água)
+        this.ret(g, -5.2, -19.5, 10.4, 13, 3.2, C.camisa);
+        if (costas) {
+            this.ret(g, -4.2, -18.6, 8.4, 9.4, 2.2, C.mochila);
+            g.fillStyle = "#8f5a28"; g.fillRect(-4.2, -15.4, 8.4, 1.2);
+        }
+
+        // Braços alternando braçadas sobre a superfície da água
+        const ampBraco = this.movendo ? 4.2 : 1.5;
+        const bxE = -7.6 - Math.max(0, s) * 1.4;
+        const bxD =  7.6 + Math.max(0, -s) * 1.4;
+        const yE = -12.5 - s * ampBraco;
+        const yD = -12.5 + s * ampBraco;
+
+        this.capsula(g, -5.4, -17.6, bxE, yE, 3.1, C.camisa);
+        this.capsula(g,  5.4, -17.6, bxD, yD, 3.1, C.camisa);
+        this.circ(g, bxE, yE, 1.8, C.pele);
+        this.circ(g, bxD, yD, 1.8, C.pele);
+        if (this.armaTipo) this.maoArma(g, bxD, yD);
+
+        // Cabeça erguida acima da água
+        if (costas) {
+            this.circ(g, 0, -26.5, 7.7, C.cabelo);
+            g.strokeStyle = "rgba(255,255,255,0.18)"; g.lineWidth = 1.2;
+            g.beginPath(); g.arc(0, -27.1, 4.6, Math.PI * 1.15, Math.PI * 1.7); g.stroke();
+        } else {
+            this.circ(g, 0, -26.3, 7.2, C.pele);
+            g.beginPath(); g.arc(0, -26.3, 7.7, Math.PI * 1.12, Math.PI * 1.88); g.closePath();
+            this.forma(g, C.cabelo);
+            this.elip(g, -2.7, -24.8, 0.95, 1.3, C.contorno);
+            this.elip(g,  2.7, -24.8, 0.95, 1.3, C.contorno);
+            g.fillStyle = "rgba(230,110,110,0.45)";
+            g.beginPath(); g.arc(-4.5, -23.0, 1.2, 0, Math.PI * 2); g.arc(4.5, -23.0, 1.2, 0, Math.PI * 2); g.fill();
+            // Boca respirando/sorrindo fora d'água
+            g.strokeStyle = C.contorno; g.lineWidth = 0.85; g.lineCap = "round";
+            g.beginPath(); g.arc(0, -23.2, 1.6, Math.PI * 0.15, Math.PI * 0.85); g.stroke();
+        }
+
+        g.restore();
+    }
+
+    // Nado lateral: corpo inclinado horizontalmente na água com braçadas circulares
+    nadarLado(g, s, c, flutua) {
+        const C = this.cores;
+        const submersoY = 8.5 - flutua;
+
+        g.save();
+        g.translate(0, submersoY);
+
+        // Corpo inclinado para frente enquanto nada (ou mais vertical boiando parado)
+        const inclinacao = this.movendo ? 0.58 : 0.16;
+        g.save();
+        g.rotate(inclinacao);
+
+        // Braço de trás fazendo ciclo circular
+        const raioBraco = this.movendo ? 5.2 : 2.0;
+        const hBx = -c * raioBraco;
+        const hBy = -14.5 + s * (raioBraco * 0.65);
+        this.capsula(g, 0, -17.6, hBx, hBy, 3, C.camisaEscura);
+        this.circ(g, hBx, hBy, 1.8, C.pele);
+
+        // Mochila e tronco submersos na diagonal
+        this.ret(g, -6.9, -18.6, 4, 9, 1.8, C.mochila);
+        this.ret(g, -3.8, -19.5, 7.6, 12.5, 3.2, C.camisa);
+
+        // Braço da frente em fase oposta (crawl)
+        const hAx = c * raioBraco;
+        const hAy = -14.5 - s * (raioBraco * 0.65);
+        this.capsula(g, 0.4, -17.6, hAx, hAy, 3, C.camisa);
+        this.circ(g, hAx, hAy, 1.8, C.pele);
+        if (this.armaTipo) this.maoArma(g, hAx, hAy);
+        g.restore();
+
+        // Cabeça compensa a inclinação do tronco para manter rosto e olhos fora d'água
+        const cabX = this.movendo ? 8.2 : 2.5;
+        const cabY = this.movendo ? -21.5 : -25.8;
+        g.save();
+        g.translate(cabX, cabY);
+        this.circ(g, 0.8, 0, 7.2, C.pele);
+        g.beginPath();
+        g.arc(0.8, 0, 7.7, Math.PI * 0.88, Math.PI * 1.82);
+        g.quadraticCurveTo(4.6, -0.7, -1.2, 1.3);
+        g.closePath();
+        this.forma(g, C.cabelo);
+        this.elip(g, 4.3, 1.1, 0.95, 1.3, C.contorno);
+        g.fillStyle = "rgba(230,110,110,0.45)";
+        g.beginPath(); g.arc(5.2, 3.4, 1.2, 0, Math.PI * 2); g.fill();
+        g.strokeStyle = C.contorno; g.lineWidth = 0.8; g.lineCap = "round";
+        g.beginPath(); g.moveTo(5.0, 4.1); g.lineTo(6.6, 3.8); g.stroke();
+        g.restore();
+
+        g.restore();
     }
 
     // arco branco que acompanha o golpe de espada/machado

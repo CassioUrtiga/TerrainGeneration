@@ -55,6 +55,11 @@ class GerarTerreno {
         for (const terreno of this.terrenos) terreno.personagem = personagem;
     }
 
+    // ponto da tela -> posição na grade (para clicar e andar até lá)
+    telaParaGrade(x, y) {
+        return this.terrenos[this.tipoTerreno].telaParaGrade(x, y);
+    }
+
     resetarVista() {
         this.terrenos[this.tipoTerreno].resetarVista();
     }

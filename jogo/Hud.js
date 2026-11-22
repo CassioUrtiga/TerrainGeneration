@@ -63,11 +63,19 @@ class Hud {
         g.setTransform(1, 0, 0, 1, 0, 0);
         g.lineCap = "round";
 
-        // ---- vida ----
-        const s = 8.5;
-        for (let k = 0; k < p.vidaMax; k++) this.coracao(g, 22 + k * 21, 24, s, k < p.vida);
-        this.texto(g, `${Math.ceil(p.vida)} / ${p.vidaMax}`, 14, 48, "#ffd9dc", 12, "left");
-        this.texto(g, `Abates: ${j.abates}`, 14, 66, "#fff", 12, "left");
+        const cx = canvas.width / 2;
+        const r1 = this.slotRect(0, canvas);
+
+        // ---- Vida ----
+        const s = 7.5;
+        const espacoCoracao = 19;
+        const larguraTotalCoracoes = (p.vidaMax - 1) * espacoCoracao;
+        const inicioX = cx - larguraTotalCoracoes / 2;
+        const coracaoY = r1.y - 32;
+
+        for (let k = 0; k < p.vidaMax; k++) {
+            this.coracao(g, inicioX + k * espacoCoracao, coracaoY, s, k < p.vida);
+        }
 
         // ---- hotbar ----
         for (let i = 0; i < 3; i++) {
@@ -91,16 +99,14 @@ class Hud {
         }
 
         // nome do item selecionado
-        const r1 = this.slotRect(0, canvas);
-        const cx = canvas.width / 2;
         const atual = j.inv.atual();
         const def = atual ? Itens.tipos[atual.tipo] : Itens.punho;
         this.texto(g, `${def.nome} · ${def.info}`, cx, r1.y - 12, "#ffffff", 13);
 
-        // dica para pegar item do chão
+        // dica para pegar item do chão (acima dos corações)
         if (j.itemPerto && !p.morto) {
             const d = Itens.tipos[j.itemPerto.tipo];
-            this.texto(g, `[E] Pegar ${d.nome}`, cx, r1.y - 34, "#ffe08a", 14);
+            this.texto(g, `[E] Pegar ${d.nome}`, cx, coracaoY - 22, "#ffe08a", 14);
         }
 
         // ---- avisos ----

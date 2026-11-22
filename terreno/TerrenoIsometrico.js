@@ -32,6 +32,7 @@ class TerrenoIsometrico {
         this.quadro = 0;
         this.duracaoGeracao = 45;
         this.ondaInicial = true;
+        this.raioSemGeracao = 12;    // tiles até esta distância da câmera já nascem prontos (sem efeito)
 
         // Zoom: o centro da tela (onde fica o personagem) é o ponto fixo
         this.zoom = 1;          // valor atual (suavizado)
@@ -62,6 +63,7 @@ class TerrenoIsometrico {
 
         // Itens no chão e entidades (personagem, NPCs, flechas...)
         this.jogo = null;
+        this.vista = {};                        // câmera do último frame (para converter cliques)
         this.itensAtivos = true;                // liga/desliga os itens no chão
         this.coletados = new Set();             // tiles de onde um item já foi pego
         this.bufItem = [];
@@ -102,12 +104,7 @@ class TerrenoIsometrico {
         const alg = this.algoritmo;
         if (alg.hash2(i, j, 31) > 0.008) return null;
         const h = alg.hash2(i, j, 32);
-        if (h < 0.15) return "espada";
-        if (h < 0.25) return "machado";
-        if (h < 0.35) return "arco";
-        if (h < 0.60) return "maca";
-        if (h < 0.80) return "pao";
-        return "carne";
+        return Itens.sortear(h);
     }
 
     // O tile (i, j) tem um obstáculo que bloqueia a passagem?
@@ -163,9 +160,7 @@ class TerrenoIsometrico {
 
     // Altura (z do mundo) do tile (i, j) neste frame — usada na colisão
     alturaTile(i, j) {
-        return this.alturaBruta(i, j)
-            * this.crescimento(this.tiles.get(this.chave(i, j)))
-            * this.escalaAltura;
+        return this.alturaBruta(i, j) * this.escalaAltura;
     }
 
     // Altura de um tile fora da área calculada no frame (só nas bordas)
@@ -244,6 +239,10 @@ class TerrenoIsometrico {
             else this.jogo.limpar();
         }
         const camX = this.camX, camY = this.camY, camZ = this.camZ;
+        const vista = this.vista;
+        vista.cx = cx; vista.cy = cy; vista.zoom = zoom; vista.s = s;
+        vista.camX = camX; vista.camY = camY; vista.camZ = camZ;
+        vista.cosA = cosA; vista.sinA = sinA; vista.cosP = cosP; vista.sinP = sinP;
 
         // ---- 2) caixa de tiles que cobre a tela ----
         const marg = s * 2;
@@ -324,13 +323,19 @@ class TerrenoIsometrico {
                 let info = tiles.get(k);
 
                 if (!info) {
-                    // só "nasce" quando entra de fato na tela (a faixa maior é só margem)
                     const dy = (j - camY) * s;
                     const sx = cx + dx * cosA - dy * sinA;
                     const syB = c2base + (dx * sinA + dy * cosA) * sinP;
-                    if (sx > vx0 - s && sx < vx1 + s && syB > vy0 - s && syB < vy1 + s) {
-                        const atraso = this.ondaInicial ? Math.hypot(i - camX, j - camY) * 2 : 0;
-                        info = { nasc: quadro + atraso, visto: quadro };
+                    
+                    // Usa a caixa estendida (xLo..xHi, yLo..yHi) para gerar antes de entrar na tela
+                    if (sx >= xLo && sx <= xHi && syB >= yLo && syB <= yHi) {
+                        const refX = p ? p.gx : camX;
+                        const refY = p ? p.gy : camY;
+                        const dist = Math.hypot(i - refX, j - refY);
+                        const nasc = dist < this.raioSemGeracao
+                            ? quadro - this.duracaoGeracao
+                            : quadro + (this.ondaInicial ? (dist - this.raioSemGeracao) * 2 : 0);
+                        info = { nasc, visto: quadro };
                         tiles.set(k, info);
                     }
                 }
@@ -362,12 +367,27 @@ class TerrenoIsometrico {
         }
         this.ondaInicial = false;
 
-        // ---- entidades agrupadas por tile (desenhadas na ordem de profundidade) ----
+        // ---- Entidades agrupadas pelo tile mais frontal da pegada (evita cortes nos pés/corpo) ----
         const entMap = this.entMap;
         entMap.clear();
         const ents = this.jogo ? this.jogo.entidades() : (p ? [p] : []);
-        for (const e of ents) {
-            const ei = Math.round(e.gx), ej = Math.round(e.gy);
+        const dirFrontI = sinA >= 0 ? 1 : -1;
+        const dirFrontJ = cosA >= 0 ? 1 : -1;
+
+        for (let idxE = 0; idxE < ents.length; idxE++) {
+            const e = ents[idxE];
+            // Desloca a referência de profundidade para a borda frontal da entidade na direção da câmera
+            const margemProf = (e.raio || 0.25) + 0.18;
+            let ei = Math.round(e.gx + dirFrontI * margemProf);
+            let ej = Math.round(e.gy + dirFrontJ * margemProf);
+
+            // Garante que não ultrapasse para um tile frontal muito mais alto (evita aparecer através de paredes)
+            const altAtual = this.alturaTile(Math.round(e.gx), Math.round(e.gy));
+            if (this.alturaTile(ei, ej) > altAtual + 4) {
+                ei = Math.round(e.gx);
+                ej = Math.round(e.gy);
+            }
+
             if (ei < i0 || ei > i1) continue;
             const er = ei - i0;
             if (ej < rowMin[er] || ej > rowMax[er]) continue;
@@ -503,8 +523,45 @@ class TerrenoIsometrico {
 
         ctx.setTransform(1, 0, 0, 1, 0, 0);
 
+        // Medidor de FPS
+        if (!this._fps) this._fps = { t: performance.now(), frames: 0, valor: 60, ms: 0 };
+        const agora = performance.now();
+        this._fps.frames++;
+        if (agora - this._fps.t >= 500) { // atualiza a cada 0,5s
+            this._fps.valor = Math.round((this._fps.frames * 1000) / (agora - this._fps.t));
+            this._fps.ms = ((agora - this._fps.t) / this._fps.frames).toFixed(1);
+            this._fps.frames = 0;
+            this._fps.t = agora;
+        }
+
+        ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
+        ctx.fillRect(10, 10, 125, 24);
+        ctx.fillStyle = this._fps.valor >= 55 ? "#7CFC00" : "#FFD700";
+        ctx.font = "bold 12px monospace";
+        ctx.fillText(`FPS: ${this._fps.valor} (${this._fps.ms}ms)`, 16, 26);
+
         this.quadro++;
         this.tempo += this.velocidade;
+    }
+
+    // Ponto da tela (px do canvas) -> posição na grade { gx, gy }.
+    // Inverte a projeção do último frame e desce um "raio" de cima para baixo até achar a
+    // superfície do terreno: o tile devolvido é exatamente o que aparece sob o ponto clicado.
+    telaParaGrade(sx, sy) {
+        const v = this.vista;
+        if (v.cx === undefined) return null;
+        const u = v.cx + (sx - v.cx) / v.zoom;       // desfaz o zoom
+        const w = v.cy + (sy - v.cy) / v.zoom;
+        const x1 = u - v.cx;
+        const zTopo = this.amplitude * 2 * this.escalaAltura + 4;   // acima de qualquer tile
+        let gx = v.camX, gy = v.camY;
+        for (let z = zTopo; z >= 0; z -= 0.5) {
+            const y1 = (w - v.cy + (z - v.camZ) * v.cosP) / v.sinP;
+            gx = v.camX + (x1 * v.cosA + y1 * v.sinA) / v.s;
+            gy = v.camY + (-x1 * v.sinA + y1 * v.cosA) / v.s;
+            if (this.alturaTile(Math.round(gx), Math.round(gy)) >= z) break;
+        }
+        return { gx, gy };
     }
 
     // Sorteia o obstáculo do tile, evitando a área do personagem e do ponto inicial
