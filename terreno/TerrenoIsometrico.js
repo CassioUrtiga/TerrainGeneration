@@ -69,6 +69,32 @@ class TerrenoIsometrico {
         this.bufItem = [];
         this.bufEnt = new Uint8Array(0);
         this.entMap = new Map();
+
+        // --- objetos reaproveitados a cada frame (zero alocação no desenhar) ---
+        this._r1 = [0, 0];
+        this._r2 = [0, 0];
+        this._ox = new Float64Array(4);
+        this._oy = new Float64Array(4);
+        this._facesVis = new Int8Array(4);
+        this._corLado = ["", "", "", ""];
+        this._yawLado = NaN;
+        this._poolListas = [];
+        this._viz = new Int32Array(4);
+
+        // --- descarte de tiles (culling) ---
+        this.bufVis = new Uint8Array(0);        // 1 = o tile precisa ser desenhado neste frame
+        this.hor = new Float32Array(0);         // "horizonte": y a partir do qual a tela já está coberta, por coluna
+        this._perfil = new Float32Array(128);   // borda superior do tile (y por x), igual para todos os tiles
+        this.margemObstaculo = 70;              // altura máxima (px) de árvore/pedra acima do tile — ajuste se tiver obstáculos mais altos
+        this.culling = true;                    // liga/desliga o descarte de tiles escondidos
+
+        // cache de alturas válido só dentro do frame (colisão/NPCs consultam os mesmos tiles várias vezes)
+        this._cI = new Int32Array(4096);
+        this._cJ = new Int32Array(4096);
+        this._cQ = new Int32Array(4096).fill(-1);
+        this._cV = new Float64Array(4096);
+        this._entUnico = [null];
+        this._fps = { t: performance.now(), frames: 0, valor: 60, ms: "0.0", texto: "FPS: 60 (0.0ms)" };
     }
 
     alturaRelativa(i, j) {
@@ -127,7 +153,7 @@ class TerrenoIsometrico {
                     const [f0, c0] = paradas[k], [f1, c1] = paradas[k + 1];
                     if (f >= f0 && f < f1) {
                         const u = (f - f0) / (f1 - f0);
-                        c = [0, 1, 2].map((q) => Math.round(c0[q] + (c1[q] - c0[q]) * u));
+                        c = [Math.round(c0[0] + (c1[0] - c0[0]) * u), Math.round(c0[1] + (c1[1] - c0[1]) * u), Math.round(c0[2] + (c1[2] - c0[2]) * u)];
                         break;
                     }
                 }
@@ -137,17 +163,25 @@ class TerrenoIsometrico {
         return pal;
     }
 
+    // Chave inteira de 30 bits (cabe em um Smi do V8: hash de Map/Set bem mais rápido que com doubles).
+    // Cobre i, j em [-16384, 16383].
     chave(i, j) {
-        return (i + 32768) * 65536 + (j + 32768);
+        return (i + 16384) * 32768 + (j + 16384);
     }
 
     // Altura "pura" do terreno em (i, j) — i e j podem ser negativos
     alturaBruta(i, j) {
-        const v = this.algoritmo.altura(
+        const h = (Math.imul(i, 73856093) ^ Math.imul(j, 19349663)) & 4095;
+        if (this._cQ[h] === this.quadro && this._cI[h] === i && this._cJ[h] === j) return this._cV[h];
+        const v0 = this.algoritmo.altura(
             i, j, this.algoritmoTerreno, this.frequencia, this.tempo, this.amplitude
         );
-        return v > 0 ? v : 0; // negativos e NaN viram 0
+        const v = v0 > 0 ? v0 : 0; // negativos e NaN viram 0
+        this._cQ[h] = this.quadro; this._cI[h] = i; this._cJ[h] = j; this._cV[h] = v;
+        return v;
     }
+
+    _invalidarAlturas() { this._cQ.fill(-1); }
 
     // 0..1: quanto o tile já cresceu (sem registro = tile "antigo", já crescido)
     crescimento(info) {
@@ -155,7 +189,8 @@ class TerrenoIsometrico {
         const p = (this.quadro - info.nasc) / this.duracaoGeracao;
         if (p <= 0) return 0;
         if (p >= 1) return 1;
-        return 1 - Math.pow(1 - p, 3); // easeOutCubic
+        const q = 1 - p;
+        return 1 - q * q * q; // easeOutCubic
     }
 
     // Altura (z do mundo) do tile (i, j) neste frame — usada na colisão
@@ -195,6 +230,7 @@ class TerrenoIsometrico {
 
     desenhar() {
         const ctx = this.caneta;
+        this._cQ.fill(-1);
         const W = ctx.canvas.width;
         const H = ctx.canvas.height;
 
@@ -251,14 +287,16 @@ class TerrenoIsometrico {
         const yLo = vy0 - marg, yHi = vy1 + marg + margemAltura;
 
         let minI = Infinity, maxI = -Infinity, minJ = Infinity, maxJ = -Infinity;
-        for (const ux of [xLo - cx, xHi - cx]) {
-            for (const uy of [yLo - cy, yHi - cy]) {
-                const y1 = (uy - camZ * cosP) / sinP;
-                const gi = camX + (ux * cosA + y1 * sinA) / s;
-                const gj = camY + (-ux * sinA + y1 * cosA) / s;
-                if (gi < minI) minI = gi; if (gi > maxI) maxI = gi;
-                if (gj < minJ) minJ = gj; if (gj > maxJ) maxJ = gj;
-            }
+        for (let a = 0; a < 4; a++) {
+            const ux = (a & 1 ? xHi : xLo) - cx;
+            const uy = (a & 2 ? yHi : yLo) - cy;
+            const y1 = (uy - camZ * cosP) / sinP;
+            const gi = camX + (ux * cosA + y1 * sinA) / s;
+            const gj = camY + (-ux * sinA + y1 * cosA) / s;
+            if (gi < minI) minI = gi;
+            if (gi > maxI) maxI = gi;
+            if (gj < minJ) minJ = gj;
+            if (gj > maxJ) maxJ = gj;
         }
         const i0 = Math.floor(minI), i1 = Math.ceil(maxI);
         const j0 = Math.floor(minJ), j1 = Math.ceil(maxJ);
@@ -273,6 +311,7 @@ class TerrenoIsometrico {
             this.bufObs = new Array(this.bufAlt.length).fill(null);
             this.bufItem = new Array(this.bufAlt.length).fill(null);
             this.bufEnt = new Uint8Array(this.bufAlt.length);
+            this.bufVis = new Uint8Array(this.bufAlt.length);
         }
         if (this.rowMin.length < nLin) {
             this.rowMin = new Int32Array(nLin * 2);
@@ -300,17 +339,27 @@ class TerrenoIsometrico {
         // Em cada linha i só entram os j realmente visíveis (faixa exata, não a caixa inteira)
         const a1 = -sinA, a2 = cosA * sinP;
         const c2base = cy + camZ * cosP;
-        const r1 = [0, 0], r2 = [0, 0];
+        const r1 = this._r1, r2 = this._r2;
         const tiles = this.tiles;
         const quadro = this.quadro;
+        const alg = this.algoritmo;
+        const algTipo = this.algoritmoTerreno, freq = this.frequencia;
+        const tempo = this.tempo, amp = this.amplitude;
+        const dur = this.duracaoGeracao, raioSG = this.raioSemGeracao;
+        const onda = this.ondaInicial;
+        const obsAtivos = this.obstaculosAtivos, itensAtivos = this.itensAtivos;
+        const nomePaleta = tipoInfo.paleta;
+        const refX = p ? p.gx : camX;
+        const refY = p ? p.gy : camY;
+        let maxZ = 0;
 
         for (let i = i0; i <= i1; i++) {
             const r = i - i0;
             const dx = (i - camX) * s;
             TerrenoIsometrico.intervalo(a1, cx + dx * cosA, xLo, xHi, r1);
             TerrenoIsometrico.intervalo(a2, c2base + dx * sinA * sinP, yLo, yHi, r2);
-            const lo = Math.max(r1[0], r2[0]);
-            const hi = Math.min(r1[1], r2[1]);
+            const lo = r1[0] > r2[0] ? r1[0] : r2[0];
+            const hi = r1[1] < r2[1] ? r1[1] : r2[1];
             if (lo > hi) { rowMin[r] = 1; rowMax[r] = 0; continue; }
 
             const jMin = Math.max(j0, Math.ceil(camY + lo / s));
@@ -318,50 +367,68 @@ class TerrenoIsometrico {
             rowMin[r] = jMin; rowMax[r] = jMax;
 
             const base = (i - i0 + 1) * nJ - j0 + 1;
+            const rowKey = (i + 16384) * 32768 + 16384;
+            const dxCos = cx + dx * cosA;
+            const dxSin = dx * sinA;
+
             for (let j = jMin; j <= jMax; j++) {
-                const k = (i + 32768) * 65536 + (j + 32768);
+                const k = rowKey + j;
                 let info = tiles.get(k);
 
-                if (!info) {
+                if (info === undefined) {
                     const dy = (j - camY) * s;
-                    const sx = cx + dx * cosA - dy * sinA;
-                    const syB = c2base + (dx * sinA + dy * cosA) * sinP;
-                    
-                    // Usa a caixa estendida (xLo..xHi, yLo..yHi) para gerar antes de entrar na tela
+                    const sx = dxCos - dy * sinA;
+                    const syB = c2base + (dxSin + dy * cosA) * sinP;
+
+                    // caixa estendida (xLo..xHi, yLo..yHi): gera antes de entrar na tela
                     if (sx >= xLo && sx <= xHi && syB >= yLo && syB <= yHi) {
-                        const refX = p ? p.gx : camX;
-                        const refY = p ? p.gy : camY;
-                        const dist = Math.hypot(i - refX, j - refY);
-                        const nasc = dist < this.raioSemGeracao
-                            ? quadro - this.duracaoGeracao
-                            : quadro + (this.ondaInicial ? (dist - this.raioSemGeracao) * 2 : 0);
-                        info = { nasc, visto: quadro };
+                        const ddi = i - refX, ddj = j - refY;
+                        const dist = Math.sqrt(ddi * ddi + ddj * ddj);
+                        const nasc = dist < raioSG
+                            ? quadro - dur
+                            : quadro + (onda ? (dist - raioSG) * 2 : 0);
+                        // todos os campos já na criação -> mesma "forma" de objeto (JIT mais rápido)
+                        info = { nasc, visto: quadro, sig: -1, obst: null, item: undefined };
                         tiles.set(k, info);
                     }
                 }
 
-                if (info) {
+                const pos = base + j;
+                if (info !== undefined) {
                     info.visto = quadro;
-                    const bruta = this.alturaBruta(i, j);
-                    const e = this.crescimento(info);
-                    alt[base + j] = bruta * e * esc;
-                    cores[base + j] = Math.min(255, (bruta * invPal) | 0);
+                    let bruta = alg.altura(i, j, algTipo, freq, tempo, amp);
+                    if (!(bruta > 0)) bruta = 0;           // negativos e NaN viram 0
+
+                    // easeOutCubic inline
+                    const pr = (quadro - info.nasc) / dur;
+                    let e;
+                    if (pr >= 1) e = 1;
+                    else if (pr <= 0) e = 0;
+                    else { const q = 1 - pr; e = 1 - q * q * q; }
+
+                    const zz = bruta * e * esc;
+                    alt[pos] = zz;
+                    if (zz > maxZ) maxZ = zz;
+                    const ci = (bruta * invPal) | 0;
+                    cores[pos] = ci > 255 ? 255 : ci;
 
                     if (info.sig !== sig) {
                         info.sig = sig;
-                        info.obst = this.obstaculosAtivos
-                            ? this.decidirObstaculo(i, j, bruta * invPal / 255, tipoInfo.paleta)
+                        info.obst = obsAtivos
+                            ? this.decidirObstaculo(i, j, bruta * invPal / 255, nomePaleta)
                             : null;
                     }
-                    if (info.obst) { obsBuf[base + j] = info.obst; escBuf[base + j] = e; }
+                    const ob = info.obst;
+                    if (ob) { obsBuf[pos] = ob; escBuf[pos] = e; }
 
                     if (info.item === undefined) {   // itens: sorteados uma vez, quando o tile nasce
-                        info.item = info.obst ? null : this.decidirItem(i, j, bruta * invPal / 255);
+                        info.item = ob ? null : this.decidirItem(i, j, bruta * invPal / 255);
                     }
-                    if (info.item && this.itensAtivos) { itemBuf[base + j] = info.item; escBuf[base + j] = e; }
+                    const it = info.item;
+                    if (it && itensAtivos) { itemBuf[pos] = it; escBuf[pos] = e; }
                 } else {
-                    alt[base + j] = 0; // ainda não nasceu: chão plano
-                    cores[base + j] = 0;
+                    alt[pos] = 0; // ainda não nasceu: chão plano
+                    cores[pos] = 0;
                 }
             }
         }
@@ -370,22 +437,26 @@ class TerrenoIsometrico {
         // ---- Entidades agrupadas pelo tile mais frontal da pegada (evita cortes nos pés/corpo) ----
         const entMap = this.entMap;
         entMap.clear();
-        const ents = this.jogo ? this.jogo.entidades() : (p ? [p] : []);
+        let ents;
+        if (this.jogo) ents = this.jogo.entidades();
+        else if (p) { this._entUnico[0] = p; this._entUnico.length = 1; ents = this._entUnico; }
+        else ents = this._entUnico, ents.length = 0;
         const dirFrontI = sinA >= 0 ? 1 : -1;
         const dirFrontJ = cosA >= 0 ? 1 : -1;
+        const pool = this._poolListas;
+        let poolUsados = 0;
 
         for (let idxE = 0; idxE < ents.length; idxE++) {
             const e = ents[idxE];
-            // Desloca a referência de profundidade para a borda frontal da entidade na direção da câmera
+            // referência de profundidade na borda frontal da entidade (evita cortes nos pés/corpo)
             const margemProf = (e.raio || 0.25) + 0.18;
+            const ri0 = Math.round(e.gx), rj0 = Math.round(e.gy);
             let ei = Math.round(e.gx + dirFrontI * margemProf);
             let ej = Math.round(e.gy + dirFrontJ * margemProf);
 
-            // Garante que não ultrapasse para um tile frontal muito mais alto (evita aparecer através de paredes)
-            const altAtual = this.alturaTile(Math.round(e.gx), Math.round(e.gy));
-            if (this.alturaTile(ei, ej) > altAtual + 4) {
-                ei = Math.round(e.gx);
-                ej = Math.round(e.gy);
+            // não ultrapassa para um tile frontal bem mais alto (evita aparecer através de paredes)
+            if (ei !== ri0 || ej !== rj0) {
+                if (this.alturaTile(ei, ej) > this.alturaTile(ri0, rj0) + 4) { ei = ri0; ej = rj0; }
             }
 
             if (ei < i0 || ei > i1) continue;
@@ -394,37 +465,158 @@ class TerrenoIsometrico {
             const eidx = (ei - i0 + 1) * nJ + (ej - j0 + 1);
             entBuf[eidx] = 1;
             const lista = entMap.get(eidx);
-            if (lista) lista.push(e); else entMap.set(eidx, [e]);
+            if (lista) lista.push(e);
+            else {
+                const nova = pool[poolUsados] || (pool[poolUsados] = []);
+                poolUsados++;
+                nova.length = 0;
+                nova.push(e);
+                entMap.set(eidx, nova);
+            }
         }
+        const cmpProf = (a, b) => (a.gx * sinA + a.gy * cosA) - (b.gx * sinA + b.gy * cosA);
 
         // ---- 4) valores constantes do frame, iguais para todos os tiles ----
         // deslocamento na tela de cada canto do tile (ligeiramente maior p/ cobrir frestas)
         const E = 1.04;
-        const cdx = [-meio, meio, meio, -meio];
-        const cdy = [-meio, -meio, meio, meio];
-        const ox = [0, 0, 0, 0], oy = [0, 0, 0, 0];
+        const ox = this._ox, oy = this._oy;
         for (let k = 0; k < 4; k++) {
-            ox[k] = (cdx[k] * cosA - cdy[k] * sinA) * E;
-            oy[k] = (cdx[k] * sinA + cdy[k] * cosA) * sinP * E;
+            const cdx = (k === 1 || k === 2) ? meio : -meio;
+            const cdy = k >= 2 ? meio : -meio;
+            ox[k] = (cdx * cosA - cdy * sinA) * E;
+            oy[k] = (cdx * sinA + cdy * cosA) * sinP * E;
         }
-        // visibilidade e cor de cada face lateral (só dependem da câmera)
+        const ox0 = ox[0], ox1 = ox[1], ox2 = ox[2], ox3 = ox[3];
+        const oy0 = oy[0], oy1 = oy[1], oy2 = oy[2], oy3 = oy[3];
+        const minOx = Math.min(ox0, ox1, ox2, ox3), maxOx = Math.max(ox0, ox1, ox2, ox3);
+        const minOy = Math.min(oy0, oy1, oy2, oy3), maxOy = Math.max(oy0, oy1, oy2, oy3);
+
+        // faces laterais: só as que olham para a câmera (back-face culling); cor só depende do yaw
         const NX = this.NX, NY = this.NY;
-        const visivel = [false, false, false, false];
-        const corLado = ["", "", "", ""];
-        const [lr, lg, lb] = this.corLadoRGB;
+        const facesVis = this._facesVis;
+        let nVis = 0;
         for (let k = 0; k < 4; k++) {
-            visivel[k] = NX[k] * sinA + NY[k] * cosA > 1e-6;
-            const n1x = NX[k] * cosA - NY[k] * sinA;
-            const f = 1 - Math.max(0, Math.min(0.4, 0.12 + 0.13 * n1x));
-            corLado[k] = `rgb(${(lr * f) | 0},${(lg * f) | 0},${(lb * f) | 0})`;
+            if (NX[k] * sinA + NY[k] * cosA > 1e-6) facesVis[nVis++] = k;
         }
-        const viz = [-1, nJ, 1, -nJ];   // deslocamento no buffer até o vizinho de cada face
+        const corLado = this._corLado;
+        if (this._yawLado !== this.yaw) {
+            this._yawLado = this.yaw;
+            const [lr, lg, lb] = this.corLadoRGB;
+            for (let k = 0; k < 4; k++) {
+                const n1x = NX[k] * cosA - NY[k] * sinA;
+                const f = 1 - Math.max(0, Math.min(0.4, 0.12 + 0.13 * n1x));
+                corLado[k] = `rgb(${(lr * f) | 0},${(lg * f) | 0},${(lb * f) | 0})`;
+            }
+        }
+        const viz = this._viz;       // deslocamento no buffer até o vizinho de cada face
+        viz[0] = -1; viz[1] = nJ; viz[2] = 1; viz[3] = -nJ;
 
-        let corAtual = null;
-
-        // ---- 5) desenho de trás para frente, SEM ordenar ----
-        // Basta percorrer i e j começando pelo lado mais distante da câmera.
+        const jogo = this.jogo;
+        const itemPerto = jogo ? jogo.itemPerto : null;
+        const obstaculos = this.obstaculos;
         const iAsc = sinA >= 0, jAsc = cosA >= 0;
+        const dirJ = jAsc ? 1 : -1;
+        const dSx = -s * sinA * dirJ, dSy = s * cosA * sinP * dirJ;   // passo na tela ao andar 1 tile em j
+
+        // ---- 4b) pré-passagem FRENTE -> TRÁS: decide quais tiles realmente aparecem ----
+        // (a) fora da tela  (b) totalmente escondidos atrás de tiles mais próximos e mais altos.
+        // O "horizonte" guarda, por coluna de pixels, o y a partir do qual a tela já está coberta.
+        const vis = this.bufVis;
+        vis.fill(0, 0, tam);
+        const margemObs = this.margemObstaculo;
+        const cullX0 = vx0 - 48, cullX1 = vx1 + 48;
+        const bw = 6;                                   // largura da coluna do horizonte (px)
+        const bx0 = vx0 - 64;
+        const nb = Math.ceil((vx1 - vx0 + 128) / bw) + 1;
+        // só vale a pena se o relevo é alto o bastante para esconder algum tile
+        const usarHor = this.culling && maxZ * cosP > s * sinP * 0.35;
+        let tOff = 0;
+        if (usarHor) {
+            if (this.hor.length < nb) this.hor = new Float32Array(nb * 2);
+            this.hor.fill(Infinity, 0, nb);
+            // borda superior do tile (y em função de x), em passos de 1px; igual para todos os tiles
+            tOff = Math.floor(minOx) - 1;
+            const tN = Math.ceil(maxOx) - tOff + 2;
+            if (this._perfil.length < tN) this._perfil = new Float32Array(tN * 2);
+            const Tp = this._perfil;
+            for (let d = 0; d < tN; d++) {
+                const x = tOff + d;
+                let y = Infinity;
+                for (let k = 0; k < 4; k++) {
+                    const k2 = (k + 1) & 3;
+                    const xa = ox[k], xb = ox[k2], ya = oy[k], yb = oy[k2];
+                    const lo = xa < xb ? xa : xb, hi = xa < xb ? xb : xa;
+                    if (x < lo || x > hi) continue;
+                    const yy = hi - lo < 1e-9 ? (ya < yb ? ya : yb) : ya + (yb - ya) * (x - xa) / (xb - xa);
+                    if (yy < y) y = yy;
+                }
+                Tp[d] = y;
+            }
+        }
+        const hor = this.hor, T = this._perfil;
+
+        for (let ri = nLin - 1; ri >= 0; ri--) {
+            const i = iAsc ? i0 + ri : i1 - ri;
+            const r = i - i0;
+            const jMin = rowMin[r], jMax = rowMax[r];
+            if (jMin > jMax) continue;
+
+            const dx = (i - camX) * s;
+            const base = (i - i0 + 1) * nJ - j0 + 1;
+            const nCols = jMax - jMin + 1;
+            const jIni = jAsc ? jMin : jMax;
+            const dy0 = (jIni - camY) * s;
+            const sxRow = cx + dx * cosA - dy0 * sinA;
+            const syRow = c2base + (dx * sinA + dy0 * cosA) * sinP;
+
+            for (let rj = nCols - 1; rj >= 0; rj--) {
+                const sx = sxRow + rj * dSx;
+                if (sx < cullX0 || sx > cullX1) continue;                 // fora da tela (lados)
+                const idx = base + jIni + rj * dirJ;
+                const syBase = syRow + rj * dSy;
+                if (syBase + maxOy < vy0) continue;                       // tile todo acima da tela
+
+                const syTopo = syBase - alt[idx] * cosP;
+                const te = entBuf[idx];
+                // folga acima do tile: entidades, obstáculos e itens "crescem" para cima
+                const extra = te !== 0 ? 70 : obsBuf[idx] !== null ? margemObs : itemBuf[idx] !== null ? 14 : 0;
+                const topY = syTopo + minOy - extra;
+                if (topY > vy1) continue;                                 // tile todo abaixo da tela
+
+                if (usarHor) {
+                    const bl = Math.floor((sx + minOx - bx0) / bw);
+                    const br = Math.floor((sx + maxOx - bx0) / bw);
+                    if (te === 0 && bl >= 0 && br < nb) {
+                        let escondido = true;
+                        for (let q = bl; q <= br; q++) {
+                            if (topY < hor[q]) { escondido = false; break; }
+                        }
+                        if (escondido) continue;                          // coberto por tiles mais próximos
+                    }
+                    // este tile cobre da sua borda superior para baixo: atualiza o horizonte
+                    // (só nas colunas inteiramente dentro dele; ali vale o maior y das duas pontas)
+                    const q0 = Math.max(0, Math.ceil((sx + minOx - bx0) / bw));
+                    const q1 = Math.min(nb - 1, Math.floor((sx + maxOx - bx0) / bw) - 1);
+                    for (let q = q0; q <= q1; q++) {
+                        const xl = bx0 + q * bw - sx;
+                        const fl = Math.floor(xl) - tOff, fr = Math.floor(xl + bw) - tOff;
+                        let m = T[fl] > T[fl + 1] ? T[fl] : T[fl + 1];
+                        const m2 = T[fr] > T[fr + 1] ? T[fr] : T[fr + 1];
+                        if (m2 > m) m = m2;
+                        const cob = syTopo + m;
+                        if (cob < hor[q]) hor[q] = cob;
+                    }
+                }
+                vis[idx] = 1;
+            }
+        }
+
+        // Cor atual do contexto: 0..255 = paleta, 256..259 = faces laterais, -1 = desconhecida.
+        // Polígonos consecutivos de mesma cor entram num único path (um só fill()).
+        let corAtual = -1;
+        let aberto = false;
+
+        // ---- 5) desenho de trás para frente, SEM ordenar, só o que está visível ----
         for (let ri = 0; ri < nLin; ri++) {
             const i = iAsc ? i0 + ri : i1 - ri;
             const r = i - i0;
@@ -434,74 +626,121 @@ class TerrenoIsometrico {
             const dx = (i - camX) * s;
             const base = (i - i0 + 1) * nJ - j0 + 1;
             const nCols = jMax - jMin + 1;
+            const jIni = jAsc ? jMin : jMax;
+            const dy0 = (jIni - camY) * s;
+            const sxRow = cx + dx * cosA - dy0 * sinA;
+            const syRow = c2base + (dx * sinA + dy0 * cosA) * sinP;
 
-            for (let rj = 0; rj < nCols; rj++) {
-                const j = jAsc ? jMin + rj : jMax - rj;
-                const dy = (j - camY) * s;
-                const sx = cx + dx * cosA - dy * sinA;
-                const syBase = c2base + (dx * sinA + dy * cosA) * sinP;
-                const idx = base + j;
+            let rj = 0;
+            while (rj < nCols) {
+                const rjAtual = rj++;
+                const idx = base + jIni + rjAtual * dirJ;
+                if (vis[idx] === 0) continue;
+
+                const sx = sxRow + rjAtual * dSx;
+                const syBase = syRow + rjAtual * dSy;
                 const z = alt[idx];
                 const syTopo = syBase - z * cosP;
+                const cid = cores[idx];
+                const ob = obsBuf[idx];
+                const item = itemBuf[idx];
+                const temEnt = entBuf[idx];
 
-                // faces laterais: só o trecho acima do vizinho (o resto fica escondido por ele)
+                // ---- chão plano (sem lados, obstáculo, item ou entidade): funde a sequência
+                //      de tiles iguais da linha num único paralelogramo ----
+                if (z <= 0.5 && ob === null && item === null && temEnt === 0) {
+                    let fim = rjAtual;
+                    while (fim + 1 < nCols) {
+                        const i2 = idx + (fim + 1 - rjAtual) * dirJ;
+                        if (vis[i2] === 0 || alt[i2] > 0.5 || cores[i2] !== cid ||
+                            obsBuf[i2] !== null || itemBuf[i2] !== null || entBuf[i2] !== 0) break;
+                        fim++;
+                    }
+                    const n = fim - rjAtual;
+                    const sxF = sx + n * dSx;
+                    const syF = syRow + fim * dSy - alt[idx + n * dirJ] * cosP;
+                    rj = fim + 1;
+
+                    if (cid !== corAtual) {
+                        if (aberto) { ctx.fill(); aberto = false; }
+                        ctx.fillStyle = paletaAtiva[cid]; corAtual = cid;
+                    }
+                    if (!aberto) { ctx.beginPath(); aberto = true; }
+                    // L = tile de menor j, H = tile de maior j
+                    const sxL = jAsc ? sx : sxF, syL = jAsc ? syTopo : syF;
+                    const sxH = jAsc ? sxF : sx, syH = jAsc ? syF : syTopo;
+                    ctx.moveTo(sxL + ox0, syL + oy0);
+                    ctx.lineTo(sxL + ox1, syL + oy1);
+                    ctx.lineTo(sxH + ox2, syH + oy2);
+                    ctx.lineTo(sxH + ox3, syH + oy3);
+                    continue;
+                }
+
+                // faces laterais: só as voltadas para a câmera e só o trecho acima do vizinho
                 if (z > 0.5) {
-                    for (let k = 0; k < 4; k++) {
-                        if (!visivel[k]) continue;
+                    for (let q = 0; q < nVis; q++) {
+                        const k = facesVis[q];
                         let hn = alt[idx + viz[k]];
-                        if (hn !== hn) hn = this.alturaBorda(i + NX[k], j + NY[k]); // NaN
+                        if (hn !== hn) hn = this.alturaBorda(i + NX[k], jIni + rjAtual * dirJ + NY[k]); // NaN
                         if (z - hn < 0.5) continue;
 
                         const k2 = (k + 1) & 3;
                         const syB = syBase - hn * cosP;
-                        if (corLado[k] !== corAtual) { ctx.fillStyle = corLado[k]; corAtual = corLado[k]; }
-                        ctx.beginPath();
+                        const id = 256 + k;
+                        if (id !== corAtual) {
+                            if (aberto) { ctx.fill(); aberto = false; }
+                            ctx.fillStyle = corLado[k]; corAtual = id;
+                        }
+                        if (!aberto) { ctx.beginPath(); aberto = true; }
                         ctx.moveTo(sx + ox[k], syTopo + oy[k]);
                         ctx.lineTo(sx + ox[k2], syTopo + oy[k2]);
                         ctx.lineTo(sx + ox[k2], syB + oy[k2]);
                         ctx.lineTo(sx + ox[k], syB + oy[k]);
-                        ctx.fill();
                     }
                 }
 
                 // topo
-                const cor = paletaAtiva[cores[idx]];
-                if (cor !== corAtual) { ctx.fillStyle = cor; corAtual = cor; }
-                ctx.beginPath();
-                ctx.moveTo(sx + ox[0], syTopo + oy[0]);
-                ctx.lineTo(sx + ox[1], syTopo + oy[1]);
-                ctx.lineTo(sx + ox[2], syTopo + oy[2]);
-                ctx.lineTo(sx + ox[3], syTopo + oy[3]);
-                ctx.fill();
+                if (cid !== corAtual) {
+                    if (aberto) { ctx.fill(); aberto = false; }
+                    ctx.fillStyle = paletaAtiva[cid]; corAtual = cid;
+                }
+                if (!aberto) { ctx.beginPath(); aberto = true; }
+                ctx.moveTo(sx + ox0, syTopo + oy0);
+                ctx.lineTo(sx + ox1, syTopo + oy1);
+                ctx.lineTo(sx + ox2, syTopo + oy2);
+                ctx.lineTo(sx + ox3, syTopo + oy3);
+
+                if (ob === null && item === null && temEnt === 0) continue;
+
+                // daqui em diante o código externo desenha: fecha o path em aberto
+                if (aberto) { ctx.fill(); aberto = false; }
+                const j = jIni + rjAtual * dirJ;
 
                 // obstáculo (árvore, pedra...): logo depois do tile, antes dos mais próximos
-                const ob = obsBuf[idx];
                 if (ob && escBuf[idx] > 0.04) {
-                    const ox = ob.ox * s, oy = ob.oy * s;
-                    this.obstaculos.desenhar(
+                    const obx = ob.ox * s, oby = ob.oy * s;
+                    obstaculos.desenhar(
                         ctx, ob,
-                        sx + ox * cosA - oy * sinA,
-                        syTopo + (ox * sinA + oy * cosA) * sinP,
+                        sx + obx * cosA - oby * sinA,
+                        syTopo + (obx * sinA + oby * cosA) * sinP,
                         escBuf[idx]
                     );
+                    corAtual = -1;
                 }
 
                 // item no chão
-                const item = itemBuf[idx];
                 if (item && escBuf[idx] > 0.2) {
-                    const perto = this.jogo && this.jogo.itemPerto &&
-                        this.jogo.itemPerto.i === i && this.jogo.itemPerto.j === j;
-                    Itens.desenharChao(ctx, item, sx, syTopo, this.quadro, perto);
-                    corAtual = null; // o item troca o fillStyle (brilho e sombra): força reaplicar a cor do tile
+                    const perto = itemPerto && itemPerto.i === i && itemPerto.j === j;
+                    Itens.desenharChao(ctx, item, sx, syTopo, quadro, perto);
+                    corAtual = -1; // o item troca o fillStyle (brilho e sombra)
                 }
 
                 // entidades neste tile (personagem, NPCs, flechas...): logo depois dele
-                if (entBuf[idx]) {
+                if (temEnt) {
                     const lista = entMap.get(idx);
-                    if (lista.length > 1) {
-                        lista.sort((a, b) => (a.gx * sinA + a.gy * cosA) - (b.gx * sinA + b.gy * cosA));
-                    }
-                    for (const e of lista) {
+                    if (lista.length > 1) lista.sort(cmpProf);
+                    for (let q = 0; q < lista.length; q++) {
+                        const e = lista[q];
                         const edx = (e.gx - camX) * s, edy = (e.gy - camY) * s;
                         e.desenharEm(
                             cx + edx * cosA - edy * sinA,
@@ -509,36 +748,38 @@ class TerrenoIsometrico {
                             sinP, cosP, cosA, sinA
                         );
                     }
-                    corAtual = null; // as entidades mexem no estado do contexto
+                    corAtual = -1; // as entidades mexem no estado do contexto
                 }
             }
         }
+        if (aberto) ctx.fill();
 
         // ---- 6) limpeza: esquece tiles que saíram da tela há tempo ----
         if (quadro % 180 === 0) {
-            for (const [k, info] of tiles) {
+            tiles.forEach((info, k) => {
                 if (quadro - info.visto > 240) tiles.delete(k);
-            }
+            });
         }
 
         ctx.setTransform(1, 0, 0, 1, 0, 0);
 
-        // Medidor de FPS
-        if (!this._fps) this._fps = { t: performance.now(), frames: 0, valor: 60, ms: 0 };
+        // Medidor de FPS (o texto só é reconstruído a cada 0,5 s)
+        const fps = this._fps;
         const agora = performance.now();
-        this._fps.frames++;
-        if (agora - this._fps.t >= 500) { // atualiza a cada 0,5s
-            this._fps.valor = Math.round((this._fps.frames * 1000) / (agora - this._fps.t));
-            this._fps.ms = ((agora - this._fps.t) / this._fps.frames).toFixed(1);
-            this._fps.frames = 0;
-            this._fps.t = agora;
+        fps.frames++;
+        if (agora - fps.t >= 500) {
+            fps.valor = Math.round((fps.frames * 1000) / (agora - fps.t));
+            fps.ms = ((agora - fps.t) / fps.frames).toFixed(1);
+            fps.texto = `FPS: ${fps.valor} (${fps.ms}ms)`;
+            fps.frames = 0;
+            fps.t = agora;
         }
 
         ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
         ctx.fillRect(10, 10, 125, 24);
-        ctx.fillStyle = this._fps.valor >= 55 ? "#7CFC00" : "#FFD700";
+        ctx.fillStyle = fps.valor >= 55 ? "#7CFC00" : "#FFD700";
         ctx.font = "bold 12px monospace";
-        ctx.fillText(`FPS: ${this._fps.valor} (${this._fps.ms}ms)`, 16, 26);
+        ctx.fillText(fps.texto, 16, 26);
 
         this.quadro++;
         this.tempo += this.velocidade;
@@ -576,8 +817,8 @@ class TerrenoIsometrico {
     set setItens(valor) { this.itensAtivos = !!valor; }
     set setObstaculos(valor) { this.obstaculosAtivos = !!valor; }
     set setZoom(valor) { this.zoomAlvo = valor; }
-    set setAmplitude(valor) { this.amplitude = valor; }
-    set setFrequencia(valor) { this.frequencia = valor; }
-    set setAlgoritmoTerreno(valor) { this.algoritmoTerreno = valor; }
+    set setAmplitude(valor) { this.amplitude = valor; this._invalidarAlturas(); }
+    set setFrequencia(valor) { this.frequencia = valor; this._invalidarAlturas(); }
+    set setAlgoritmoTerreno(valor) { this.algoritmoTerreno = valor; this._invalidarAlturas(); }
     set setVelocidade(valor) { this.velocidade = valor; }
 }

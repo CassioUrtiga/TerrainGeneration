@@ -1,7 +1,40 @@
+const ALG_GX2 = new Int8Array([1, -1, 1, -1, 1, -1, 0, 0]);
+const ALG_GY2 = new Int8Array([1, 1, -1, -1, 0, 0, 1, -1]);
+const ALG_G3 = (() => {
+    const gx = new Int8Array(16), gy = new Int8Array(16), gz = new Int8Array(16);
+    for (let h = 0; h < 16; h++) {
+        const u = h < 8 ? "x" : "y";
+        const v = h < 4 ? "y" : (h === 12 || h === 14 ? "x" : "z");
+        const su = (h & 1) ? -1 : 1, sv = (h & 2) ? -1 : 1;
+        for (const [eixo, s] of [[u, su], [v, sv]]) {
+            if (eixo === "x") gx[h] = s; else if (eixo === "y") gy[h] = s; else gz[h] = s;
+        }
+    }
+    return { gx, gy, gz };
+})();
+const ALG_G3X = ALG_G3.gx, ALG_G3Y = ALG_G3.gy, ALG_G3Z = ALG_G3.gz;
+
 class Algoritmo {
     constructor(semente = 20240607) {
         this.oitavas = 5;                   // camadas de detalhe do relevo
         this.perm = new Uint8Array(512);    // tabela de permutação do ruído
+
+        // ---- cache por tile ----
+        // Quase todo o relevo (warp, sulcos, buracos...) NÃO depende do tempo: só as oitavas
+        // 3D do fbm e o 2º sulco mudam a cada frame. A parte fixa é calculada uma vez por tile
+        // e guardada aqui; a cada frame só a parte animada é recalculada.
+        // Índice direto: (i & 255, j & 511) -> janelas de até 256 x 512 tiles sem colisão.
+        const N = 1 << 17;
+        this._gen = 1;                      // muda quando semente/tipo/frequência/oitavas mudam
+        this._ci = new Int32Array(N);
+        this._cj = new Int32Array(N);
+        this._cg = new Int32Array(N);       // 0 = vazio
+        this._sd = new Float64Array(N * 8); // parte fixa (8 valores por tile)
+        this._ct = new Float64Array(N).fill(NaN);   // tempo do último resultado
+        this._ch = new Float64Array(N);             // último resultado (0..1, antes da amplitude)
+        this._esc = new Float64Array(8);            // área temporária (i, j não inteiros)
+        this._sigTipo = -1; this._sigFreq = NaN; this._sigOit = -1;
+
         this.semear(semente);
     }
 
@@ -23,56 +56,40 @@ class Algoritmo {
             const tmp = p[i]; p[i] = p[j]; p[j] = tmp;
         }
         for (let i = 0; i < 512; i++) this.perm[i] = p[i & 255];
+        this._gen++;                        // invalida o cache
     }
 
     // Altura em (i, j), sempre entre 0 e 2 * amplitude.
     altura(i, j, tipo, frequencia, tempo, amplitude) {
+        if (!(tipo >= 0 && tipo <= 7) || (tipo | 0) !== tipo) return 0;   // tipo inválido
         const nf = frequencia * 0.08;
-        const x = i * nf, y = j * nf;
         const m = amplitude * 2;
+        const x = i * nf, y = j * nf;
+        let h;
 
-        // Máscara de segurança na área inicial (spawn) para não abrir buracos sob o jogador
-        const distOrigem2 = i * i + j * j;
-        const fatorSpawn = distOrigem2 < 36 ? Math.max(0, (Math.sqrt(distOrigem2) - 2.5) / 3.5) : 1;
-
-        let h = 0;
-        switch (tipo) {
-            case 0: // Colinas realistas: relevo ondulado + erosão de encosta + dolinas/lagos
-                h = this.colinasRealistas(x, y, tempo, fatorSpawn);
-                break;
-
-            case 1: // Montanhas: cordilheiras com cristas, contrafortes e ravinas erodidas
-                h = this.montanhasRealistas(x, y, tempo, fatorSpawn);
-                break;
-
-            case 2: // Ilhas: arquipélagos recortados, enseadas, lagos internos e erosão costeira
-                h = this.ilhasRealistas(x, y, tempo, fatorSpawn);
-                break;
-
-            case 3: // Terraços: platôs geológicos quebrados por falhas e erosão
-                h = this.terracosRealistas(x, y, tempo, fatorSpawn);
-                break;
-
-            case 4: // Relevo orgânico: dobras tectônicas (domain warping duplo) + vales erodidos
-                h = this.organicoRealista(x, y, tempo, fatorSpawn);
-                break;
-
-            case 5: // Vulcões: cones com crateras, caldeiras secundárias e canais de lava
-                h = this.vulcoes(x, y, tempo, fatorSpawn);
-                break;
-
-            case 6: // Dunas: dunas assimétricas com bacias de deflação e ondulado de vento
-                h = this.dunas(x, y, tempo, fatorSpawn);
-                break;
-
-            case 7: // Cânions: platôs estratificados cortados por rios meandrantes e afluentes
-                h = this.canions(x, y, tempo, fatorSpawn);
-                break;
-
-            default:
-                return 0;
+        if ((i | 0) === i && (j | 0) === j) {
+            const oit = this.oitavas;
+            if (tipo !== this._sigTipo || frequencia !== this._sigFreq || oit !== this._sigOit) {
+                this._sigTipo = tipo; this._sigFreq = frequencia; this._sigOit = oit;
+                this._gen++;
+            }
+            const idx = ((i & 255) << 9) | (j & 511);
+            const o = idx << 3;
+            if (this._cg[idx] === this._gen && this._ci[idx] === i && this._cj[idx] === j) {
+                if (this._ct[idx] === tempo) {          // mesma consulta no mesmo instante
+                    h = this._ch[idx];
+                    return (h < 0 ? 0 : h > 1 ? 1 : h) * m;
+                }
+            } else {
+                this._cg[idx] = this._gen; this._ci[idx] = i; this._cj[idx] = j;
+                this._estatico(tipo, i, j, x, y, this._sd, o);
+            }
+            h = this._dinamico(tipo, this._sd, o, x, y, tempo);
+            this._ct[idx] = tempo; this._ch[idx] = h;
+        } else {
+            this._estatico(tipo, i, j, x, y, this._esc, 0);
+            h = this._dinamico(tipo, this._esc, 0, x, y, tempo);
         }
-
         return (h < 0 ? 0 : h > 1 ? 1 : h) * m;
     }
 
@@ -80,154 +97,258 @@ class Algoritmo {
         return this.altura(i, j, tipo, frequencia, tempo, amplitude);
     }
 
-    // ================== terrenos realistas com erosão e buracos ==================
+    // ================== parte FIXA de cada terreno (não depende do tempo) ==================
+    // Slots: sd[o + k]. NaN = "ainda não calculado" (sulco e buraco são calculados só se forem usados).
+    // sd[o + 7] = fator da área inicial (spawn).
 
-    colinasRealistas(x, y, tempo, fatorSpawn) {
-        // Distorção suave (domain warping) para curvas naturais de vale
-        const wx = x + 0.65 * this.fbm(x * 0.7 + 3.1, y * 0.7 + 8.4, tempo, 2);
-        const wy = y + 0.65 * this.fbm(x * 0.7 + 19.2, y * 0.7 + 4.7, tempo, 2);
+    _estatico(tipo, i, j, x, y, sd, o) {
+        // Máscara de segurança na área inicial (spawn) para não abrir buracos sob o jogador
+        const d2 = i * i + j * j;
+        sd[o + 7] = d2 < 36 ? Math.max(0, (Math.sqrt(d2) - 2.5) / 3.5) : 1;
 
-        let h = this.normalizar(this.fbm(wx, wy, tempo, this.oitavas));
-        // Aplica erosão hidráulica (sulcos nas encostas médias e sedimentação nos fundos)
-        h = this.aplicarErosao(wx, wy, h, tempo, 0.24);
-        // Escava buracos/dolinas naturais e pequenos lagos
-        h -= this.buracos(wx, wy, 0.34, 0.42) * fatorSpawn;
-        return h;
-    }
+        switch (tipo) {
+            case 0: { // Colinas
+                const wx = x + 0.65 * this._fbm2n(x * 0.7 + 3.1, y * 0.7 + 8.4);
+                const wy = y + 0.65 * this._fbm2n(x * 0.7 + 19.2, y * 0.7 + 4.7);
+                sd[o] = wx; sd[o + 1] = wy; sd[o + 2] = this._fbm2(wx, wy);
+                sd[o + 3] = NaN; sd[o + 4] = NaN;
+                break;
+            }
+            case 1: { // Montanhas
+                const wx = x + 0.45 * this._fbm2n(x * 0.8 + 11.4, y * 0.8 + 2.9);
+                const wy = y + 0.45 * this._fbm2n(x * 0.8 + 6.7, y * 0.8 + 15.1);
+                sd[o] = wx; sd[o + 1] = wy;
+                // 2 primeiras oitavas das cristas
+                let n = 1 - Math.abs(this.noise2(wx, wy));
+                n *= n;
+                let soma = n, prev = n;
+                n = 1 - Math.abs(this.noise2(wx * 2.03 + 31.7, wy * 2.03 + 17.3));
+                n *= n;
+                soma += n * 0.5 * prev; prev = n;
+                sd[o + 2] = soma; sd[o + 3] = prev;
+                sd[o + 4] = this._fbm2(wx * 0.65, wy * 0.65);
+                sd[o + 5] = NaN; sd[o + 6] = NaN;
+                break;
+            }
+            case 2: { // Ilhas
+                const wx = x + 0.75 * this._fbm2n(x * 0.6 + 9.2, y * 0.6 + 1.8);
+                const wy = y + 0.75 * this._fbm2n(x * 0.6 + 22.5, y * 0.6 + 13.6);
+                sd[o] = wx; sd[o + 1] = wy; sd[o + 2] = this._fbm2(wx, wy);
+                sd[o + 3] = NaN; sd[o + 4] = NaN;
+                break;
+            }
+            case 3: { // Terraços
+                const wx = x + 0.5 * this.noise2(x * 0.9 + 4.2, y * 0.9 + 7.8);
+                const wy = y + 0.5 * this.noise2(x * 0.9 + 14.1, y * 0.9 + 3.3);
+                sd[o] = wx; sd[o + 1] = wy; sd[o + 2] = this._fbm2(wx, wy);
+                sd[o + 3] = this.noise2(x * 2.4, y * 2.4);
+                sd[o + 4] = NaN; sd[o + 5] = NaN;
+                break;
+            }
+            case 4: { // Relevo orgânico
+                const qx = this._fbm2n(x, y);
+                const qy = this._fbm2n(x + 5.2, y + 1.3);
+                const rx = x + 2.8 * qx, ry = y + 2.8 * qy;
+                sd[o] = rx; sd[o + 1] = ry; sd[o + 2] = this._fbm2(rx, ry);
+                sd[o + 3] = NaN; sd[o + 4] = NaN;
+                break;
+            }
+            case 5: { // Vulcões
+                const xs = x * 1.6, ys = y * 1.6;
+                const xi = Math.floor(xs), yi = Math.floor(ys);
+                let cone = 0;
+                for (let dy = -1; dy <= 1; dy++) {
+                    for (let dx = -1; dx <= 1; dx++) {
+                        const cx = xi + dx, cy = yi + dy;
+                        if (this.hash2(cx, cy, 1) > 0.62) continue;
+                        const px = cx + 0.25 + 0.5 * this.hash2(cx, cy, 2);
+                        const py = cy + 0.25 + 0.5 * this.hash2(cx, cy, 3);
+                        const R = 0.5 + 0.42 * this.hash2(cx, cy, 4);
+                        const ddx = xs - px, ddy = ys - py;
+                        const dd2 = ddx * ddx + ddy * ddy;
+                        if (dd2 >= R * R) continue;
 
-    montanhasRealistas(x, y, tempo, fatorSpawn) {
-        const wx = x + 0.45 * this.fbm(x * 0.8 + 11.4, y * 0.8 + 2.9, tempo, 2);
-        const wy = y + 0.45 * this.fbm(x * 0.8 + 6.7, y * 0.8 + 15.1, tempo, 2);
-
-        // Combina cristas principais com maciço de base
-        const cume = this.cristas(wx, wy, tempo, this.oitavas);
-        const base = this.normalizar(this.fbm(wx * 0.65, wy * 0.65, tempo, 3));
-        let h = Math.min(1, cume * 0.88 + base * 0.28);
-
-        // Ravinas profundas nas encostas íngremes
-        h = this.aplicarErosao(wx * 1.15, wy * 1.15, h, tempo, 0.32);
-        // Crateras/depressões glaciais (circos)
-        h -= this.buracos(wx * 0.85, wy * 0.85, 0.26, 0.35) * fatorSpawn;
-        return h;
-    }
-
-    ilhasRealistas(x, y, tempo, fatorSpawn) {
-        const wx = x + 0.75 * this.fbm(x * 0.6 + 9.2, y * 0.6 + 1.8, tempo, 2);
-        const wy = y + 0.75 * this.fbm(x * 0.6 + 22.5, y * 0.6 + 13.6, tempo, 2);
-
-        const t = this.normalizar(this.fbm(wx, wy, tempo, this.oitavas));
-        const s = (t - 0.44) / 0.56;
-        if (s <= 0) return 0;
-
-        let h = Math.min(1, Math.pow(s, 0.85) * 1.25);
-        h = this.aplicarErosao(wx, wy, h, tempo, 0.22);
-        // Lagoas internas e baías erodidas
-        h -= this.buracos(wx * 1.1, wy * 1.1, 0.38, 0.48) * fatorSpawn;
-        return h <= 0.004 ? 0 : h;
-    }
-
-    terracosRealistas(x, y, tempo, fatorSpawn) {
-        const wx = x + 0.5 * this.noise2(x * 0.9 + 4.2, y * 0.9 + 7.8);
-        const wy = y + 0.5 * this.noise2(x * 0.9 + 14.1, y * 0.9 + 3.3);
-
-        const bruto = this.normalizar(this.fbm(wx, wy, tempo, this.oitavas));
-        // Quebra a regularidade dos degraus com ruído local
-        const irreg = bruto + 0.06 * this.noise2(x * 2.4, y * 2.4);
-        let h = this.terraco(Math.max(0, Math.min(1, irreg)), 6);
-
-        // Erosão nas bordas dos platôs e buracos de colapso (karst)
-        h = this.aplicarErosao(wx, wy, h, tempo, 0.18);
-        h -= this.buracos(wx, wy, 0.36, 0.45) * fatorSpawn;
-        return h;
-    }
-
-    organicoRealista(x, y, tempo, fatorSpawn) {
-        const qx = this.fbm(x, y, tempo, 2);
-        const qy = this.fbm(x + 5.2, y + 1.3, tempo, 2);
-        const rx = x + 2.8 * qx;
-        const ry = y + 2.8 * qy;
-
-        let h = this.normalizar(this.fbm(rx, ry, tempo, this.oitavas));
-        h = this.aplicarErosao(rx * 0.8, ry * 0.8, h, tempo, 0.28);
-        h -= this.buracos(x, y, 0.32, 0.44) * fatorSpawn;
-        return h;
-    }
-
-    // Vulcões: cones com cratera, caldeiras de colapso e canais erodidos por lava
-    vulcoes(x, y, tempo, fatorSpawn) {
-        const xs = x * 1.6, ys = y * 1.6;
-        const xi = Math.floor(xs), yi = Math.floor(ys);
-        let cone = 0;
-
-        for (let dy = -1; dy <= 1; dy++) {
-            for (let dx = -1; dx <= 1; dx++) {
-                const cx = xi + dx, cy = yi + dy;
-                if (this.hash2(cx, cy, 1) > 0.62) continue;
-                const px = cx + 0.25 + 0.5 * this.hash2(cx, cy, 2);
-                const py = cy + 0.25 + 0.5 * this.hash2(cx, cy, 3);
-                const R = 0.5 + 0.42 * this.hash2(cx, cy, 4);
-                const ddx = xs - px, ddy = ys - py;
-                const d2 = ddx * ddx + ddy * ddy;
-                if (d2 >= R * R) continue;
-
-                const u = Math.sqrt(d2) / R;
-                const rc = 0.15;
-                let h;
-                if (u < rc) h = Math.pow(1 - rc, 1.4) - 0.38 * (1 - (u / rc) * (u / rc));
-                else h = Math.pow(1 - u, 1.35);
-                h *= 0.65 + 0.35 * this.hash2(cx, cy, 5);
-                if (h > cone) cone = h;
+                        const u = Math.sqrt(dd2) / R;
+                        const rc = 0.15;
+                        let h;
+                        if (u < rc) h = Math.pow(1 - rc, 1.4) - 0.38 * (1 - (u / rc) * (u / rc));
+                        else h = Math.pow(1 - u, 1.35);
+                        h *= 0.65 + 0.35 * this.hash2(cx, cy, 5);
+                        if (h > cone) cone = h;
+                    }
+                }
+                sd[o] = cone; sd[o + 1] = this._fbm2(x, y);
+                sd[o + 2] = NaN; sd[o + 3] = NaN;
+                break;
+            }
+            case 6: { // Dunas
+                sd[o] = this._fbm2(x * 0.5 + 7.1, y * 0.5 + 3.3);
+                sd[o + 1] = 0.55 + 0.45 * this.normalizar(this._fbm2n(x * 0.3 + 40, y * 0.3 + 9));
+                sd[o + 2] = this.noise2(x * 7, y * 7) * 0.035;
+                sd[o + 3] = (x * 0.8253 + y * 0.5646) * 1.6;
+                sd[o + 4] = NaN;
+                break;
+            }
+            default: { // 7 - Cânions (quase tudo é fixo)
+                const wx = x + 0.45 * this.noise2(x * 0.7 + 3.4, y * 0.7 + 9.1);
+                const wy = y + 0.45 * this.noise2(x * 0.7 + 12.8, y * 0.7 + 2.2);
+                const a = this.noise2(wx * 0.55 + 11.3, wy * 0.55 + 4.7) +
+                          0.35 * this.noise2(wx * 1.3 + 2.1, wy * 1.3 + 8.4);
+                let vale = Math.abs(a) / 0.22;
+                vale = vale > 1 ? 1 : vale;
+                vale = vale * vale * (3 - 2 * vale);
+                const afluente = Math.abs(this.noise2(wx * 1.15 + 27.4, wy * 1.15 + 16.9)) / 0.14;
+                const vAfl = afluente > 1 ? 1 : (0.55 + 0.45 * afluente * afluente);
+                sd[o] = wx; sd[o + 1] = wy;
+                sd[o + 2] = Math.pow(vale, 0.8); sd[o + 3] = vAfl;
+                sd[o + 4] = this._fbm2(wx, wy);
+                sd[o + 5] = NaN; sd[o + 6] = NaN;
+                break;
             }
         }
-        const base = this.normalizar(this.fbm(x, y, tempo, 4));
-        let v = base * 0.26 + cone * 0.92;
-        // Sulcos radiais de lava/erosão nas encostas do cone
-        v = this.aplicarErosao(x * 1.8, y * 1.8, v, tempo, 0.22);
-        // Fumarolas / buracos vulcânicos no solo
-        v -= this.buracos(x * 1.3, y * 1.3, 0.28, 0.32) * fatorSpawn;
-        return v;
     }
 
-    // Dunas: cristas assimétricas + bacias de deflação (buracos escavados pelo vento)
-    dunas(x, y, tempo, fatorSpawn) {
-        const warp = this.fbm(x * 0.5 + 7.1, y * 0.5 + 3.3, tempo, 3);
-        const u = (x * 0.8253 + y * 0.5646) * 1.6 + warp * 3.2 - tempo * 0.05;
-        const f = u - Math.floor(u);
+    // ================== parte ANIMADA de cada terreno ==================
 
-        let perfil;
-        if (f < 0.72) { const r = f / 0.72; perfil = r * r * (3 - 2 * r); }
-        else { const g = (f - 0.72) / 0.28; perfil = 1 - g * g * (3 - 2 * g); }
-
-        const porte = 0.55 + 0.45 * this.normalizar(this.fbm(x * 0.3 + 40, y * 0.3 + 9, tempo, 2));
-        const ondulacao = this.noise2(x * 7, y * 7) * 0.035;
-        let v = perfil * porte * 0.85 + 0.09 + ondulacao;
-        // Bacias de deflação e oásis rasos entre as dunas
-        v -= this.buracos(x * 0.9, y * 0.9, 0.22, 0.28) * fatorSpawn;
-        return v;
+    _dinamico(tipo, sd, o, x, y, tempo) {
+        const oit = this.oitavas;
+        switch (tipo) {
+            case 0: { // Colinas realistas: relevo ondulado + erosão de encosta + dolinas/lagos
+                const wx = sd[o], wy = sd[o + 1];
+                let h = this.normalizar(this._fbmP(wx, wy, tempo, oit, sd[o + 2]));
+                h = this._erosao(sd, o + 3, wx, wy, h, tempo, 0.24);
+                h -= this._buraco(sd, o, o + 4, wx, wy, 0.34, 0.42);
+                return h;
+            }
+            case 1: { // Montanhas: cordilheiras com cristas, contrafortes e ravinas erodidas
+                const wx = sd[o], wy = sd[o + 1];
+                const cume = oit >= 2
+                    ? this._cristasFim(wx, wy, tempo, oit, sd[o + 2], sd[o + 3])
+                    : this.cristas(wx, wy, tempo, oit);
+                const base = this.normalizar(this._fbmFim(wx * 0.65, wy * 0.65, tempo, 3, sd[o + 4]));
+                let h = Math.min(1, cume * 0.88 + base * 0.28);
+                h = this._erosao(sd, o + 5, wx * 1.15, wy * 1.15, h, tempo, 0.32);
+                h -= this._buraco(sd, o, o + 6, wx * 0.85, wy * 0.85, 0.26, 0.35);
+                return h;
+            }
+            case 2: { // Ilhas: arquipélagos recortados, enseadas, lagos internos
+                const wx = sd[o], wy = sd[o + 1];
+                const t = this.normalizar(this._fbmP(wx, wy, tempo, oit, sd[o + 2]));
+                const s = (t - 0.44) / 0.56;
+                if (s <= 0) return 0;               // oceano: nada mais é calculado
+                let h = Math.min(1, Math.pow(s, 0.85) * 1.25);
+                h = this._erosao(sd, o + 3, wx, wy, h, tempo, 0.22);
+                h -= this._buraco(sd, o, o + 4, wx * 1.1, wy * 1.1, 0.38, 0.48);
+                return h <= 0.004 ? 0 : h;
+            }
+            case 3: { // Terraços: platôs geológicos quebrados por falhas e erosão
+                const wx = sd[o], wy = sd[o + 1];
+                const bruto = this.normalizar(this._fbmP(wx, wy, tempo, oit, sd[o + 2]));
+                const irreg = bruto + 0.06 * sd[o + 3];
+                let h = this.terraco(Math.max(0, Math.min(1, irreg)), 6);
+                h = this._erosao(sd, o + 4, wx, wy, h, tempo, 0.18);
+                h -= this._buraco(sd, o, o + 5, wx, wy, 0.36, 0.45);
+                return h;
+            }
+            case 4: { // Relevo orgânico: dobras tectônicas + vales erodidos
+                const rx = sd[o], ry = sd[o + 1];
+                let h = this.normalizar(this._fbmP(rx, ry, tempo, oit, sd[o + 2]));
+                h = this._erosao(sd, o + 3, rx * 0.8, ry * 0.8, h, tempo, 0.28);
+                h -= this._buraco(sd, o, o + 4, x, y, 0.32, 0.44);
+                return h;
+            }
+            case 5: { // Vulcões: cones com crateras e canais de lava
+                const base = this.normalizar(this._fbmFim(x, y, tempo, 4, sd[o + 1]));
+                let v = base * 0.26 + sd[o] * 0.92;
+                v = this._erosao(sd, o + 2, x * 1.8, y * 1.8, v, tempo, 0.22);
+                v -= this._buraco(sd, o, o + 3, x * 1.3, y * 1.3, 0.28, 0.32);
+                return v;
+            }
+            case 6: { // Dunas: cristas assimétricas + bacias de deflação
+                const warp = this._fbmFim(x * 0.5 + 7.1, y * 0.5 + 3.3, tempo, 3, sd[o]);
+                const u = sd[o + 3] + warp * 3.2 - tempo * 0.05;
+                const f = u - Math.floor(u);
+                let perfil;
+                if (f < 0.72) { const r = f / 0.72; perfil = r * r * (3 - 2 * r); }
+                else { const g = (f - 0.72) / 0.28; perfil = 1 - g * g * (3 - 2 * g); }
+                let v = perfil * sd[o + 1] * 0.85 + 0.09 + sd[o + 2];
+                v -= this._buraco(sd, o, o + 4, x * 0.9, y * 0.9, 0.22, 0.28);
+                return v;
+            }
+            default: { // 7 - Cânions: platôs estratificados cortados por rios
+                const wx = sd[o], wy = sd[o + 1];
+                const t = this.normalizar(this._fbmP(wx, wy, tempo, oit, sd[o + 4]));
+                const plato = (0.45 + 0.55 * t) * sd[o + 2] * sd[o + 3];
+                let h = this.terraco(plato, 8);
+                h = this._erosao(sd, o + 5, wx * 1.2, wy * 1.2, h, tempo, 0.20);
+                h -= this._buraco(sd, o, o + 6, wx, wy, 0.30, 0.40);
+                return h;
+            }
+        }
     }
 
-    // Cânions: platô estratificado cortado por rio principal + afluentes erodidos + dolinas
-    canions(x, y, tempo, fatorSpawn) {
-        const wx = x + 0.45 * this.noise2(x * 0.7 + 3.4, y * 0.7 + 9.1);
-        const wy = y + 0.45 * this.noise2(x * 0.7 + 12.8, y * 0.7 + 2.2);
+    // fbm de 2 oitavas (só ruído 2D, sem tempo): soma bruta e normalizada
+    _fbm2(x, y) {
+        const n0 = this.noise2(x, y);
+        const n1 = this.noise2(x * 2.03 + 31.7, y * 2.03 + 17.3);
+        return n0 + n1 * 0.5;
+    }
+    _fbm2n(x, y) { return this._fbm2(x, y) / 1.5; }
 
-        const a = this.noise2(wx * 0.55 + 11.3, wy * 0.55 + 4.7) +
-                  0.35 * this.noise2(wx * 1.3 + 2.1, wy * 1.3 + 8.4);
-        let vale = Math.abs(a) / 0.22;
-        vale = vale > 1 ? 1 : vale;
-        vale = vale * vale * (3 - 2 * vale);
+    // continua o fbm da oitava 2 em diante (as 2 primeiras já vêm somadas em `soma`)
+    _fbmFim(x, y, tempo, oit, soma) {
+        let amp = 0.25, freq = 2.03 * 2.03, norm = 1.5;
+        for (let o = 2; o < oit; o++) {
+            const n = this.noise3(x * freq + o * 31.7, y * freq + o * 17.3, tempo * 0.12 * o);
+            soma += n * amp;
+            norm += amp;
+            amp *= 0.5;
+            freq *= 2.03;
+        }
+        return soma / norm;
+    }
+    _fbmP(x, y, tempo, oit, soma2) {
+        return oit >= 2 ? this._fbmFim(x, y, tempo, oit, soma2) : this.fbm(x, y, tempo, oit);
+    }
 
-        // Afluentes menores que deságuam no cânion principal
-        const afluente = Math.abs(this.noise2(wx * 1.15 + 27.4, wy * 1.15 + 16.9)) / 0.14;
-        const vAfl = afluente > 1 ? 1 : (0.55 + 0.45 * afluente * afluente);
+    _cristasFim(x, y, tempo, oit, soma, prev) {
+        let amp = 0.25, freq = 2.03 * 2.03, norm = 1.5;
+        for (let o = 2; o < oit; o++) {
+            let n = this.noise3(x * freq + o * 31.7, y * freq + o * 17.3, tempo * 0.12 * o);
+            n = 1 - Math.abs(n);
+            n *= n;
+            soma += n * amp * prev;
+            prev = n;
+            norm += amp;
+            amp *= 0.5;
+            freq *= 2.03;
+        }
+        return soma / norm;
+    }
 
-        const t = this.normalizar(this.fbm(wx, wy, tempo, this.oitavas));
-        const plato = (0.45 + 0.55 * t) * Math.pow(vale, 0.8) * vAfl;
-        let h = this.terraco(plato, 8);
+    // erosão com o sulco 2D guardado em sd[k] (calculado só na 1ª vez em que for preciso)
+    _erosao(sd, k, x, y, h, tempo, intensidade) {
+        if (h <= 0.01) return h;
+        let sulco1 = sd[k];
+        if (sulco1 !== sulco1) {
+            sulco1 = 1 - Math.abs(this.noise2(x * 2.6 + 13.7, y * 2.6 + 29.1));
+            sd[k] = sulco1;
+        }
+        const sulco2 = 1 - Math.abs(this.noise3(x * 5.2 + 7.3, y * 5.2 + 19.8, tempo * 0.08));
+        const rede = Math.pow(sulco1 * 0.65 + sulco2 * 0.35, 2.2);
+        const mascaraEncosta = Math.sin(Math.min(1, h) * Math.PI);
+        const deposicao = h < 0.18 ? (0.18 - h) * 0.25 : 0;
+        return h - rede * mascaraEncosta * intensidade + deposicao;
+    }
 
-        h = this.aplicarErosao(wx * 1.2, wy * 1.2, h, tempo, 0.20);
-        h -= this.buracos(wx, wy, 0.30, 0.40) * fatorSpawn;
-        return h;
+    // buraco (já multiplicado pelo fator do spawn) guardado em sd[k]
+    _buraco(sd, o, k, x, y, limiar, profundidade) {
+        let b = sd[k];
+        if (b !== b) {
+            b = this.buracos(x, y, limiar, profundidade) * sd[o + 7];
+            sd[k] = b;
+        }
+        return b;
     }
 
     // ================== erosão e buracos procedurais ==================
@@ -337,10 +458,12 @@ class Algoritmo {
         const v = yf * yf * yf * (yf * (yf * 6 - 15) + 10);
 
         const a = perm[X] + Y, b = perm[X + 1] + Y;
-        const g00 = this.grad2(perm[a], xf, yf);
-        const g10 = this.grad2(perm[b], xf - 1, yf);
-        const g01 = this.grad2(perm[a + 1], xf, yf - 1);
-        const g11 = this.grad2(perm[b + 1], xf - 1, yf - 1);
+        const h00 = perm[a] & 7, h10 = perm[b] & 7, h01 = perm[a + 1] & 7, h11 = perm[b + 1] & 7;
+        const xf1 = xf - 1, yf1 = yf - 1;
+        const g00 = ALG_GX2[h00] * xf + ALG_GY2[h00] * yf;
+        const g10 = ALG_GX2[h10] * xf1 + ALG_GY2[h10] * yf;
+        const g01 = ALG_GX2[h01] * xf + ALG_GY2[h01] * yf1;
+        const g11 = ALG_GX2[h11] * xf1 + ALG_GY2[h11] * yf1;
 
         const x0 = g00 + u * (g10 - g00);
         const x1 = g01 + u * (g11 - g01);
@@ -348,16 +471,8 @@ class Algoritmo {
     }
 
     grad2(h, x, y) {
-        switch (h & 7) {
-            case 0: return x + y;
-            case 1: return y - x;
-            case 2: return x - y;
-            case 3: return -x - y;
-            case 4: return x;
-            case 5: return -x;
-            case 6: return y;
-            default: return -y;
-        }
+        const k = h & 7;
+        return ALG_GX2[k] * x + ALG_GY2[k] * y;
     }
 
     noise3(x, y, z) {
@@ -371,21 +486,39 @@ class Algoritmo {
 
         const A = perm[X] + Y, AA = perm[A] + Z, AB = perm[A + 1] + Z;
         const B = perm[X + 1] + Y, BA = perm[B] + Z, BB = perm[B + 1] + Z;
+        const xf1 = xf - 1, yf1 = yf - 1, zf1 = zf - 1;
 
-        const l1 = this.lerp(u, this.grad3(perm[AA], xf, yf, zf), this.grad3(perm[BA], xf - 1, yf, zf));
-        const l2 = this.lerp(u, this.grad3(perm[AB], xf, yf - 1, zf), this.grad3(perm[BB], xf - 1, yf - 1, zf));
-        const l3 = this.lerp(u, this.grad3(perm[AA + 1], xf, yf, zf - 1), this.grad3(perm[BA + 1], xf - 1, yf, zf - 1));
-        const l4 = this.lerp(u, this.grad3(perm[AB + 1], xf, yf - 1, zf - 1), this.grad3(perm[BB + 1], xf - 1, yf - 1, zf - 1));
-        return this.lerp(w, this.lerp(v, l1, l2), this.lerp(v, l3, l4));
+        let h = perm[AA] & 15;
+        const g000 = ALG_G3X[h] * xf + ALG_G3Y[h] * yf + ALG_G3Z[h] * zf;
+        h = perm[BA] & 15;
+        const g100 = ALG_G3X[h] * xf1 + ALG_G3Y[h] * yf + ALG_G3Z[h] * zf;
+        h = perm[AB] & 15;
+        const g010 = ALG_G3X[h] * xf + ALG_G3Y[h] * yf1 + ALG_G3Z[h] * zf;
+        h = perm[BB] & 15;
+        const g110 = ALG_G3X[h] * xf1 + ALG_G3Y[h] * yf1 + ALG_G3Z[h] * zf;
+        h = perm[AA + 1] & 15;
+        const g001 = ALG_G3X[h] * xf + ALG_G3Y[h] * yf + ALG_G3Z[h] * zf1;
+        h = perm[BA + 1] & 15;
+        const g101 = ALG_G3X[h] * xf1 + ALG_G3Y[h] * yf + ALG_G3Z[h] * zf1;
+        h = perm[AB + 1] & 15;
+        const g011 = ALG_G3X[h] * xf + ALG_G3Y[h] * yf1 + ALG_G3Z[h] * zf1;
+        h = perm[BB + 1] & 15;
+        const g111 = ALG_G3X[h] * xf1 + ALG_G3Y[h] * yf1 + ALG_G3Z[h] * zf1;
+
+        const l1 = g000 + u * (g100 - g000);
+        const l2 = g010 + u * (g110 - g010);
+        const l3 = g001 + u * (g101 - g001);
+        const l4 = g011 + u * (g111 - g011);
+        const m1 = l1 + v * (l2 - l1);
+        const m2 = l3 + v * (l4 - l3);
+        return m1 + w * (m2 - m1);
     }
 
     lerp(t, a, b) { return a + t * (b - a); }
 
     grad3(hash, x, y, z) {
         const h = hash & 15;
-        const u = h < 8 ? x : y;
-        const v = h < 4 ? y : (h === 12 || h === 14 ? x : z);
-        return ((h & 1) ? -u : u) + ((h & 2) ? -v : v);
+        return ALG_G3X[h] * x + ALG_G3Y[h] * y + ALG_G3Z[h] * z;
     }
 }
 
