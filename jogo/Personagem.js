@@ -72,21 +72,41 @@ class Personagem {
     }
 
     // Colisão: bloqueia degraus altos demais e tiles com obstáculo (árvore, pedra...)
+    // A pegada toca no máximo 2 linhas x 2 colunas de tiles; nada é alocado aqui.
     livre(terreno, gx, gy) {
-        const tiles = this.tilesPegada(terreno, gx, gy);
-        const atuais = this.tilesPegada(terreno, this.gx, this.gy);
-        for (const [i, j] of tiles) {
-            if (terreno.alturaTile(i, j) - this.z > this.passoMax) return false;
-            // (se já está sobre um tile com obstáculo, pode sair dele)
-            if (terreno.temObstaculo && terreno.temObstaculo(i, j) &&
-                !atuais.some(([a, b]) => a === i && b === j)) return false;
+        const r = this.raio;
+        const i0 = Math.round(gx - r), i1 = Math.round(gx + r);
+        const j0 = Math.round(gy - r), j1 = Math.round(gy + r);
+        // tiles da pegada atual (se já está sobre um obstáculo, pode sair dele)
+        const ci0 = Math.round(this.gx - r), ci1 = Math.round(this.gx + r);
+        const cj0 = Math.round(this.gy - r), cj1 = Math.round(this.gy + r);
+        const temObs = terreno.temObstaculo;
+
+        for (let a = 0; a < 2; a++) {
+            const i = a === 0 ? i0 : i1;
+            if (a === 1 && i1 === i0) break;
+            for (let b = 0; b < 2; b++) {
+                const j = b === 0 ? j0 : j1;
+                if (b === 1 && j1 === j0) break;
+                if (terreno.alturaTile(i, j) - this.z > this.passoMax) return false;
+                if (temObs && terreno.temObstaculo(i, j) &&
+                    !((i === ci0 || i === ci1) && (j === cj0 || j === cj1))) return false;
+            }
         }
         return true;
     }
 
     alturaChao(terreno, gx, gy) {
-        const tiles = this.tilesPegada(terreno, gx, gy);
-        return Math.max(...tiles.map(([i, j]) => terreno.alturaTile(i, j)));
+        const r = this.raio;
+        const i0 = Math.round(gx - r), i1 = Math.round(gx + r);
+        const j0 = Math.round(gy - r), j1 = Math.round(gy + r);
+        let m = terreno.alturaTile(i0, j0);
+        if (j1 !== j0) { const h = terreno.alturaTile(i0, j1); if (h > m) m = h; }
+        if (i1 !== i0) {
+            let h = terreno.alturaTile(i1, j0); if (h > m) m = h;
+            if (j1 !== j0) { h = terreno.alturaTile(i1, j1); if (h > m) m = h; }
+        }
+        return m;
     }
 
     // Verifica se o bioma atual tem água no nível 0 (exclui vulcões e dunas)
@@ -258,12 +278,10 @@ class Personagem {
         const k = 1 / (1 + alto * 0.03);                     // a sombra diminui com a altura
 
         // sombra no chão (fica embaixo mesmo durante o pulo)
-        g.save();
         g.fillStyle = `rgba(0,0,0,${0.32 * k})`;
         g.beginPath();
         g.ellipse(sx, sy + alto * cosP, 8 * k * this.escala, Math.max(1.5, 8 * sinP) * k * this.escala, 0, 0, Math.PI * 2);
         g.fill();
-        g.restore();
 
         const ar = this.noChao ? 0 : 1;
         const andando = this.movendo && this.noChao;
@@ -484,7 +502,8 @@ class Personagem {
         const ang = this.estado === 2 ? 0 : this.estado === -2 ? Math.PI : this.estado === 1 ? -Math.PI / 2 : Math.PI / 2;
         g.save();
         g.lineCap = "round";
-        for (const [w, a] of [[5, 0.25], [2.4, 0.85]]) {
+        for (let q = 0; q < 2; q++) {
+            const w = q === 0 ? 5 : 2.4, a = q === 0 ? 0.25 : 0.85;
             g.strokeStyle = `rgba(255,255,255,${a * (1 - u * 0.7)})`;
             g.lineWidth = w;
             g.beginPath();
@@ -592,20 +611,20 @@ class Personagem {
         const C = this.cores;
 
         // pés: A é a perna da frente quando s > 0
-        const pA = ar ? [3.4, -5.6] : [s * 3.6, -2.3 - Math.max(0, c) * 2.2];
-        const pB = ar ? [-3.4, -3.4] : [-s * 3.6, -2.3 - Math.max(0, -c) * 2.2];
+        const pAx = ar ? 3.4 : s * 3.6, pAy = ar ? -5.6 : -2.3 - Math.max(0, c) * 2.2;
+        const pBx = ar ? -3.4 : -s * 3.6, pBy = ar ? -3.4 : -2.3 - Math.max(0, -c) * 2.2;
 
         // perna de trás
-        this.capsula(g, -0.3, -8.5, pB[0], pB[1], 3.5, C.calcaEscura);
-        this.elip(g, pB[0] + 0.8, pB[1] + 0.8, 2.7, 1.6, C.sapato);
+        this.capsula(g, -0.3, -8.5, pBx, pBy, 3.5, C.calcaEscura);
+        this.elip(g, pBx + 0.8, pBy + 0.8, 2.7, 1.6, C.sapato);
 
         g.save();
         g.translate(0, -bob);
 
         // braço de trás
-        const hB = ar ? [-4, -23.5] : [s * 3.6, -10.8];
-        this.capsula(g, 0, -17.6, hB[0], hB[1], 3, C.camisaEscura);
-        this.circ(g, hB[0], hB[1], 1.8, C.pele);
+        const hBx = ar ? -4 : s * 3.6, hBy = ar ? -23.5 : -10.8;
+        this.capsula(g, 0, -17.6, hBx, hBy, 3, C.camisaEscura);
+        this.circ(g, hBx, hBy, 1.8, C.pele);
 
         // mochila e tronco
         this.ret(g, -6.9, -18.6, 4, 9, 1.8, C.mochila);
@@ -614,8 +633,8 @@ class Personagem {
         g.restore();
 
         // perna da frente
-        this.capsula(g, 0.3, -8.5, pA[0], pA[1], 3.5, C.calca);
-        this.elip(g, pA[0] + 0.8, pA[1] + 0.8, 2.7, 1.6, C.sapato);
+        this.capsula(g, 0.3, -8.5, pAx, pAy, 3.5, C.calca);
+        this.elip(g, pAx + 0.8, pAy + 0.8, 2.7, 1.6, C.sapato);
 
         g.save();
         g.translate(0, -bob);
@@ -635,10 +654,10 @@ class Personagem {
         else { g.beginPath(); g.moveTo(5.0, -22.6); g.lineTo(6.6, -22.9); g.stroke(); }
 
         // braço da frente
-        const hA = ar ? [5.6, -24.2] : [-s * 3.6, -10.8];
-        this.capsula(g, 0.4, -17.6, hA[0], hA[1], 3, C.camisa);
-        this.circ(g, hA[0], hA[1], 1.8, C.pele);
-        if (this.armaTipo) this.maoArma(g, hA[0], hA[1]);
+        const hAx = ar ? 5.6 : -s * 3.6, hAy = ar ? -24.2 : -10.8;
+        this.capsula(g, 0.4, -17.6, hAx, hAy, 3, C.camisa);
+        this.circ(g, hAx, hAy, 1.8, C.pele);
+        if (this.armaTipo) this.maoArma(g, hAx, hAy);
         g.restore();
     }
 }
